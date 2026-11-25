@@ -127,12 +127,12 @@ def readiness():
         return jsonify({
             "service": "NayaDrishti AI",
             "status": "database_not_ready",
-            "phase": 3
+            "phase": 4
         }), 503
     return jsonify({
         "service": "NayaDrishti AI",
         "status": "ready",
-        "phase": 3,
+        "phase": 4,
         "database": "connected",
         "sources": database["sources"]
     })
