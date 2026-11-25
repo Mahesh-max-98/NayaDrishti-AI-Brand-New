@@ -1004,13 +1004,14 @@ if DATABASE_INITIALIZED:
 
 LOGIN = """<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>Admin login</title><style>body{background:#0b1220;color:white;font:16px system-ui;display:grid;place-items:center;min-height:90vh}.box{background:#152238;padding:28px;border-radius:16px}input,button{padding:12px;margin:6px;border-radius:8px}</style><div class=box><h2>NayaDrishti Admin</h2><p>{{error}}</p><form method=post><input name=password type=password placeholder='Admin password' required><button>Sign in</button></form></div>"""
 PANEL = """<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>NayaDrishti Newsroom</title><style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{background:#0b1220;color:#eef4ff;font:14px system-ui;margin:0;padding:22px;max-width:1180px;margin:auto}h1{margin:8px 0}h2{margin:0 0 12px}.muted{color:#9aabc2}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.card{background:#152238;border:1px solid #30425c;border-radius:14px;padding:16px;margin:14px 0}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.stat{background:#0e192a;border:1px solid #30425c;padding:12px;border-radius:10px}.stat strong{font-size:23px;display:block}.stat span{color:#9aabc2;font-size:12px}input,button{padding:10px;border-radius:8px;margin:4px;border:1px solid #40536e}input{background:#0b1423;color:white;max-width:100%}button{background:#75e0c0;color:#071521;border:0;font-weight:700;cursor:pointer}button.secondary{background:#263a55;color:#eef4ff;border:1px solid #40536e}button.danger{background:#572e3b;color:#ffe7ed;border:1px solid #87475c}button:disabled{opacity:.5;cursor:wait}.feed{border-top:1px solid #30425c;padding:12px 0;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.feed small{display:block;color:#9aabc2;overflow-wrap:anywhere}.feed-actions{display:flex;gap:4px;flex-wrap:wrap}.pill{font-size:11px;padding:3px 8px;border-radius:20px;background:#263a55}.ok{color:#75e0c0}.bad{color:#ff9eae}.warn{color:#ffd58a}.story{border-top:1px solid #30425c;padding:12px 0}.story h3{margin:0 0 5px;font-size:15px}.story a{color:#8bc4ff}@media(max-width:700px){body{padding:12px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.feed{align-items:flex-start}}
+:root{color-scheme:dark}*{box-sizing:border-box}body{background:#0b1220;color:#eef4ff;font:14px system-ui;margin:0;padding:22px;max-width:1180px;margin:auto}h1{margin:8px 0}h2{margin:0 0 12px}.muted{color:#9aabc2}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.card{background:#152238;border:1px solid #30425c;border-radius:14px;padding:16px;margin:14px 0}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.stat{background:#0e192a;border:1px solid #30425c;padding:12px;border-radius:10px}.stat strong{font-size:23px;display:block}.stat span{color:#9aabc2;font-size:12px}input,button{padding:10px;border-radius:8px;margin:4px;border:1px solid #40536e}input{background:#0b1423;color:white;max-width:100%}button{background:#75e0c0;color:#071521;border:0;font-weight:700;cursor:pointer}button.secondary{background:#263a55;color:#eef4ff;border:1px solid #40536e}button.danger{background:#572e3b;color:#ffe7ed;border:1px solid #87475c}button:disabled{opacity:.5;cursor:wait}.feed{border-top:1px solid #30425c;padding:12px 0;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.feed small{display:block;color:#9aabc2;overflow-wrap:anywhere}.feed-actions{display:flex;gap:4px;flex-wrap:wrap}.pill{font-size:11px;padding:3px 8px;border-radius:20px;background:#263a55}.ok{color:#75e0c0}.bad{color:#ff9eae}.warn{color:#ffd58a}.story{border-top:1px solid #30425c;padding:12px 0}.story h3{margin:0 0 5px;font-size:15px}.story a{color:#8bc4ff}.draft-preview{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1423;border:1px solid #40536e;border-radius:10px;padding:12px;color:#f5f8ff;line-height:1.7}.ai-note{padding:10px;border-radius:10px;background:#0e192a;border:1px solid #30425c}.ai-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}@media(max-width:700px){body{padding:12px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.feed{align-items:flex-start}}
 </style>
 <div class=top><div><h1>NayaDrishti AI Newsroom</h1><p class=muted>Automatic Nepali news collection · refreshed every 5 minutes</p></div><a href=/admin/logout style=color:#8bc4ff>Sign out</a></div>
 <div class=grid><div class=stat><strong id=total>—</strong><span>Total sources</span></div><div class=stat><strong id=enabled>—</strong><span>Enabled sources</span></div><div class=stat><strong id=healthy>—</strong><span>Healthy sources</span></div><div class=stat><strong id=storiesCount>—</strong><span>Collected stories</span></div></div>
 <div class=card><h2>Automatic source setup</h2><p class=muted>NayaDrishti preloads available public Nepali news RSS feeds. You do not need to enter feed links. You can still add or manage sources below if needed.</p><form id=addForm><input id=sourceName placeholder='Source name' required maxlength=100><input id=sourceUrl placeholder='https://example.com/feed' required style='width:min(560px,95%)'><button id=addBtn>Add source</button></form><p id=message class=muted aria-live=polite></p></div>
 <div class=card><div class=top><div><h2>News sources</h2><p class=muted>Enable, edit, check health or remove a source.</p></div><button id=collectBtn>Collect news now</button></div><div id=feeds>Loading sources…</div></div>
 <div class=card><div class=top><div><h2>Research & editorial signals</h2><p class=muted>Headline matches are not fact-checks. Verify claims against original reporting.</p></div><select id=categoryFilter aria-label="Filter stories by category"><option value="">All categories</option></select></div><div class=grid><div class=stat><strong id=multiMatches>—</strong><span>Multi-source headline matches</span></div><div class=stat><strong id=oldStories>—</strong><span>Possibly old stories</span></div><div class=stat><strong id=breakingCandidates>—</strong><span>Breaking candidates · verify</span></div><div class=stat><strong id=headlineOnly>—</strong><span>Headline-only records</span></div></div></div>
+<div class=card><h2>Nepali AI writing engine</h2><p class=muted>Generate a Nepali Facebook draft from a collected story. Drafts are saved for review only and are never published automatically.</p><div id=aiStatus class=ai-note>Checking Gemini configuration…</div></div>
 <div class=card><h2>Latest collected stories</h2><p class=muted>Publisher links and research provenance are kept here for editorial verification. Nothing is published to Facebook automatically.</p><div id=stories>Loading…</div></div>
 <script>
 const $=id=>document.getElementById(id);
@@ -1020,9 +1021,10 @@ let allStories=[];
 function renderStories(){
 const selected=$('categoryFilter').value;
 const visible=allStories.filter(s=>!selected||s.category===selected);
-$('stories').innerHTML=visible.map(s=>'<div class=story><h3>'+esc(s.title)+'</h3><p class=muted>'+esc(s.category||'Other')+' · '+esc(s.source_name)+' · '+s.source_count+' source match(es) · '+esc(s.status)+'</p><p>'+esc(s.summary||'No article summary supplied by publisher.')+'</p><p class=muted>Evidence: '+esc(s.evidence_status||'single_source')+' · '+esc((s.research_flags||[]).join(' · '))+(s.is_breaking_candidate?' · BREAKING CANDIDATE — editorial verification required':'')+'</p><p class=muted>Publication: '+esc(s.published_at||'Unknown')+' · Group: '+esc(s.duplicate_group_key||'Not assigned')+'</p><div>'+((s.provenance||[]).map(p=>'<p><a href="'+esc(p.article_url)+'" target=_blank rel=noopener>'+esc(p.source_name)+' — original report</a></p>').join(''))+'</div></div>').join('')||'<p class=muted>No stories match this category.</p>';
+$('stories').innerHTML=visible.map(s=>'<div class=story><h3>'+esc(s.title)+'</h3><p class=muted>'+esc(s.category||'Other')+' · '+esc(s.source_name)+' · '+s.source_count+' source match(es) · '+esc(s.status)+'</p><p>'+esc(s.summary||'No article summary supplied by publisher.')+'</p><p class=muted>Evidence: '+esc(s.evidence_status||'single_source')+' · '+esc((s.research_flags||[]).join(' · '))+(s.is_breaking_candidate?' · BREAKING CANDIDATE — editorial verification required':'')+'</p><p class=muted>Publication: '+esc(s.published_at||'Unknown')+' · Group: '+esc(s.duplicate_group_key||'Not assigned')+'</p><div>'+((s.provenance||[]).map(p=>'<p><a href="'+esc(p.article_url)+'" target=_blank rel=noopener>'+esc(p.source_name)+' — original report</a></p>').join(''))+'</div><div class=ai-actions><button class=secondary data-action=generate-draft data-id='+s.id+'>'+(s.draft?'Regenerate Nepali draft':'Generate Nepali draft')+'</button>'+(s.draft?'<span class=pill ok>Draft saved · review required</span>':'<span class=pill>AI draft not generated</span>')+'</div>'+(s.draft?'<pre class=draft-preview>'+esc(s.draft)+'</pre>':'')+'</div>').join('')||'<p class=muted>No stories match this category.</p>';
 }
 async function load(){try{const d=await api('/api/admin/status');$('total').textContent=d.summary.total_sources;$('enabled').textContent=d.summary.enabled_sources;$('healthy').textContent=d.summary.healthy_sources;$('storiesCount').textContent=d.summary.stories;
+$('aiStatus').textContent=d.ai.configured?'Gemini connected · '+d.ai.model+' · Draft generation available':'Gemini API key not configured · add GEMINI_API_KEY in Render to enable draft generation';
 $('multiMatches').textContent=d.summary.research.multi_source_matches;
 $('oldStories').textContent=d.summary.research.possibly_old;
 $('breakingCandidates').textContent=d.summary.research.breaking_candidates;
@@ -1034,6 +1036,7 @@ allStories=d.stories;renderStories();
 $('feeds').innerHTML=d.sources.map(s=>'<div class=feed><div><strong>'+esc(s.name)+'</strong> '+(s.enabled?'<span class="pill ok">Enabled</span>':'<span class=pill>Disabled</span>')+' '+(s.last_error?'<span class="pill bad">Error</span>':s.last_success&&s.last_item_count>0?'<span class="pill ok">Healthy</span>':s.last_success&&s.last_item_count===0?'<span class="pill warn">Connected · no items</span>':s.last_checked?'<span class="pill warn">Checked · no success</span>':'<span class="pill warn">Not checked</span>')+'<small>'+esc(s.url)+'</small><small>Last checked: '+esc(s.last_checked||'Never')+' · Items: '+s.last_item_count+' · Failed runs: '+s.consecutive_failures+'</small>'+(s.last_error?'<small class=bad>'+esc(s.last_error)+'</small>':'')+'</div><div class=feed-actions><button class=secondary data-action=toggle data-id='+s.id+' data-enabled='+(s.enabled?'false':'true')+'>'+(s.enabled?'Disable':'Enable')+'</button><button class=secondary data-action=edit data-id='+s.id+' data-name="'+esc(s.name)+'" data-url="'+esc(s.url)+'">Edit</button><button class=danger data-action=delete data-id='+s.id+'>Remove</button></div></div>').join('')||'<p class=muted>No sources yet. Add your first RSS feed above.</p>';
 
 }catch(e){$('message').textContent=e.message}}
+$('stories').addEventListener('click',async e=>{const b=e.target.closest('button[data-action=generate-draft]');if(!b)return;const id=b.dataset.id;const original=b.textContent;b.disabled=true;b.textContent='Generating…';try{const result=await api('/api/admin/stories/'+id+'/generate-draft','POST',{});const story=allStories.find(x=>String(x.id)===String(id));if(story)story.draft=result.draft;renderStories();$('message').textContent='Nepali draft generated and saved. Please review every fact before approval.'}catch(err){$('message').textContent=err.message}finally{const current=$('stories').querySelector('button[data-id="'+id+'"][data-action=generate-draft]');if(current){current.disabled=false;current.textContent=original}}});
 $('categoryFilter').addEventListener('change',renderStories);
 $('addForm').addEventListener('submit',async e=>{e.preventDefault();$('addBtn').disabled=true;try{await api('/api/admin/sources','POST',{name:$('sourceName').value,url:$('sourceUrl').value});$('message').textContent='Source added.';$('sourceName').value='';$('sourceUrl').value='';await load()}catch(err){$('message').textContent=err.message}finally{$('addBtn').disabled=false}});
 $('feeds').addEventListener('click',async e=>{const b=e.target.closest('button[data-action]');if(!b)return;const id=b.dataset.id;try{if(b.dataset.action==='toggle'){await api('/api/admin/sources/'+id,'PATCH',{enabled:b.dataset.enabled==='true'})}else if(b.dataset.action==='edit'){const name=prompt('Source name:',b.dataset.name);if(name===null)return;const url=prompt('RSS / Atom feed URL:',b.dataset.url);if(url===null)return;await api('/api/admin/sources/'+id,'PATCH',{name,url})}else if(b.dataset.action==='delete'){if(!confirm('Remove this source? Previously collected stories will remain.'))return;await api('/api/admin/sources/'+id,'DELETE')}await load()}catch(err){alert(err.message)}});
@@ -1119,6 +1122,11 @@ def status():
     return jsonify({
         "facebook": False,
         "auto": False,
+        "ai": {
+            "provider": "Gemini",
+            "configured": bool(os.getenv("GEMINI_API_KEY", "").strip()),
+            "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        },
         "summary": {**dict(summary), "stories": story_count, "research": dict(research_summary)},
         "categories": [dict(x) for x in categories],
         "sources": [dict(x) for x in feeds],
@@ -1213,6 +1221,26 @@ def source_delete(sid):
 @auth
 def collect_now():
     return jsonify(collect())
+
+@bp.post("/api/admin/stories/<int:sid>/generate-draft")
+@auth
+def generate_story_draft(sid):
+    with conn() as c:
+        story = c.execute("SELECT id,title,summary,url FROM stories WHERE id=%s", (sid,)).fetchone()
+    if not story:
+        return jsonify({"error": "Story not found."}), 404
+    try:
+        generated = draft(story["title"], story["summary"], story["url"])
+    except (RuntimeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 503
+    with conn() as c:
+        c.execute("UPDATE stories SET draft=%s,updated_at=NOW() WHERE id=%s", (generated, sid))
+        c.execute(
+            "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+            ("ai_draft_generated", "A Nepali AI draft was generated for editorial review.",
+             Jsonb({"story_id": sid, "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash")}))
+        )
+    return jsonify({"ok": True, "story_id": sid, "draft": generated, "review_required": True})
 
 @bp.post("/api/admin/auto")
 @auth
