@@ -371,13 +371,13 @@ def _clean_news_draft(value):
     return "\n".join(text.splitlines()[:10]).strip()[:1200].rstrip()
 
 def draft(title, summary, url=None):
-    """Generate a Nepali Facebook draft with Groq; never publish it."""
-    key = os.getenv("GROQ_API_KEY", "").strip()
+    """Generate a Nepali Facebook draft through OpenRouter; never publish it."""
+    key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not key:
-        raise RuntimeError("Groq is not configured. Add GROQ_API_KEY in the Render environment.")
-    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b").strip()
-    if not re.fullmatch(r"[A-Za-z0-9._/-]{1,120}", model):
-        raise RuntimeError("GROQ_MODEL contains an invalid model name.")
+        raise RuntimeError("OpenRouter is not configured. Add OPENROUTER_API_KEY in the Render environment.")
+    model = os.getenv("OPENROUTER_MODEL", "openrouter/free").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._/-]{1,160}", model):
+        raise RuntimeError("OPENROUTER_MODEL contains an invalid model name.")
     prompt = _build_draft_prompt(title, summary)
     body = {
         "model": model,
@@ -386,12 +386,17 @@ def draft(title, summary, url=None):
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.2,
-        "max_completion_tokens": 650
+        "max_tokens": 650
     }
     req = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + key,
+            "HTTP-Referer": "https://nayadrishti-ai-brand-new.onrender.com",
+            "X-OpenRouter-Title": "NayaDrishti AI"
+        },
         method="POST"
     )
     try:
@@ -400,7 +405,7 @@ def draft(title, summary, url=None):
             if delay:
                 time.sleep(delay)
             try:
-                with urllib.request.urlopen(req, timeout=40) as response:
+                with urllib.request.urlopen(req, timeout=45) as response:
                     result = json.loads(response.read().decode("utf-8"))
                 break
             except urllib.error.HTTPError as exc:
@@ -408,29 +413,31 @@ def draft(title, summary, url=None):
                     continue
                 try:
                     payload = json.loads(exc.read(8192).decode("utf-8", errors="replace"))
-                    detail = str(payload.get("error", {}).get("message", ""))[:200]
+                    error_data = payload.get("error", {}) if isinstance(payload, dict) else {}
+                    detail = str(error_data.get("message", ""))[:240] if isinstance(error_data, dict) else str(error_data)[:240]
                 except Exception:
                     detail = ""
                 if key and detail:
                     detail = detail.replace(key, "[redacted]")
                 suffix = " Provider says: " + re.sub(r"\\s+", " ", detail) if detail else ""
+                if exc.code == 402:
+                    raise RuntimeError("OpenRouter account needs credits or the selected model is not available on the current balance." + suffix) from None
                 if exc.code == 429:
-                    raise RuntimeError("Groq rate limit or usage limit reached. Check your Groq account limits." + suffix) from None
+                    raise RuntimeError("OpenRouter rate or usage limit reached. Check your account limits." + suffix) from None
                 if exc.code in (400, 401, 403, 404):
-                    raise RuntimeError(f"Groq rejected the request (HTTP {exc.code}). Check the API key, model and account access." + suffix) from None
-                raise RuntimeError(f"Groq is temporarily unavailable after retries (HTTP {exc.code})." + suffix) from None
+                    raise RuntimeError(f"OpenRouter rejected the request (HTTP {exc.code}). Check the API key, model and account access." + suffix) from None
+                raise RuntimeError(f"OpenRouter is temporarily unavailable after retries (HTTP {exc.code})." + suffix) from None
         if result is None:
-            raise RuntimeError("Groq did not return a response. Please try again.")
+            raise RuntimeError("OpenRouter did not return a response. Please try again.")
     except (urllib.error.URLError, TimeoutError):
-        raise RuntimeError("Could not reach Groq. Please try again later.") from None
+        raise RuntimeError("Could not reach OpenRouter. Please try again later.") from None
     except (ValueError, TypeError):
-        raise RuntimeError("Groq returned an unreadable response.") from None
+        raise RuntimeError("OpenRouter returned an unreadable response.") from None
     choices = result.get("choices", [])
     generated = choices[0].get("message", {}).get("content", "") if choices else ""
     if not isinstance(generated, str) or not generated.strip():
-        raise RuntimeError("Groq did not return a text draft. Please try again.")
+        raise RuntimeError("OpenRouter did not return a text draft. Please try again.")
     return _clean_news_draft(generated)
-
 def _validate_feed_url(url):
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
@@ -1288,13 +1295,13 @@ PANEL = """<!doctype html><meta name=viewport content='width=device-width,initia
 <div class=top><div><h1>NayaDrishti AI Newsroom</h1><p class=muted>Automatic Nepali news collection · refreshed every 5 minutes</p></div><a href=/admin/logout style=color:#8bc4ff>Sign out</a></div>
 <div class=card><h2>Automatic monitoring</h2><div class=grid><div class=stat><strong id=monitorState>—</strong><span>Scheduler status</span></div><div class=stat><strong id=monitorInterval>5 min</strong><span>Collection interval</span></div><div class=stat><strong id=monitorWindow>05:00–22:55</strong><span>Nepal time window</span></div><div class=stat><strong id=monitorLastRun>—</strong><span>Last completed run</span></div></div><p id=monitorDetails class=muted>Checking automatic collection status…</p></div>
 <div class=card><h2>Analytics · last 7 days</h2><div class=grid><div class=stat><strong id=analyticsRuns>—</strong><span>Completed collection runs</span></div><div class=stat><strong id=analyticsNew>—</strong><span>New stories collected</span></div><div class=stat><strong id=analyticsFailed>—</strong><span>Failed collection runs</span></div><div class=stat><strong id=analyticsDuration>—</strong><span>Average run duration</span></div><div class=stat><strong id=analyticsPending>—</strong><span>Pending drafts</span></div><div class=stat><strong id=analyticsApproved>—</strong><span>Approved drafts</span></div></div><div class=analytics-columns><div><h3>Daily collected stories</h3><div id=dailyAnalytics class=muted>Loading…</div></div><div><h3>Top contributing sources</h3><div id=sourceAnalytics class=muted>Loading…</div></div></div><h3>Recent collection activity</h3><div id=recentRuns class=muted>Loading…</div></div>
-<div class=card><h2>System health</h2><div class=grid><div class=stat><strong id=healthDatabase>—</strong><span>PostgreSQL</span></div><div class=stat><strong id=healthScheduler>—</strong><span>Scheduler</span></div><div class=stat><strong id=healthAI>—</strong><span>Groq configuration</span></div><div class=stat><strong id=healthFacebook>—</strong><span>Facebook publishing</span></div><div class=stat><strong id=healthSources>—</strong><span>Healthy sources</span></div><div class=stat><strong id=healthErrors>—</strong><span>Source errors</span></div></div><p class=muted>Health indicators show configuration and service state; they do not guarantee external AI or publisher availability.</p></div>
+<div class=card><h2>System health</h2><div class=grid><div class=stat><strong id=healthDatabase>—</strong><span>PostgreSQL</span></div><div class=stat><strong id=healthScheduler>—</strong><span>Scheduler</span></div><div class=stat><strong id=healthAI>—</strong><span>OpenRouter configuration</span></div><div class=stat><strong id=healthFacebook>—</strong><span>Facebook publishing</span></div><div class=stat><strong id=healthSources>—</strong><span>Healthy sources</span></div><div class=stat><strong id=healthErrors>—</strong><span>Source errors</span></div></div><p class=muted>Health indicators show configuration and service state; they do not guarantee external AI or publisher availability.</p></div>
 <div class=card><h2>Facebook Page connection</h2><p class=muted>Connect with credentials stored only in Render environment settings. This test reads the Page identity only; it does not publish anything.</p><div class=grid><div class=stat><strong id=facebookConnectionStatus>—</strong><span>Connection status</span></div><div class=stat><strong id=facebookPageIdentity>—</strong><span>Facebook Page</span></div><div class=stat><strong id=facebookPublishingMode>OFF</strong><span>Publishing mode</span></div></div><div class=toolbar><button id=testFacebookConnection class=secondary disabled>Test read-only connection</button></div><p id=facebookConnectionMessage class=muted role=status aria-live=polite>Facebook publishing remains OFF. Never paste an access token into this dashboard or chat.</p><h3>Facebook publishing history</h3><div id=facebookHistory class=muted>Loading publication history…</div></div>
 <div class=grid><div class=stat><strong id=total>—</strong><span>Total sources</span></div><div class=stat><strong id=enabled>—</strong><span>Enabled sources</span></div><div class=stat><strong id=healthy>—</strong><span>Healthy sources</span></div><div class=stat><strong id=storiesCount>—</strong><span>Collected stories</span></div></div>
 <div class=card><h2>Automatic source setup</h2><p class=muted>NayaDrishti preloads available public Nepali news RSS feeds. You do not need to enter feed links. You can still add or manage sources below if needed.</p><form id=addForm><input id=sourceName placeholder='Source name' required maxlength=100><input id=sourceUrl placeholder='https://example.com/feed' required style='width:min(560px,95%)'><button id=addBtn>Add source</button></form><p id=message class=muted aria-live=polite></p></div>
 <div class=card><div class=top><div><h2>News sources</h2><p class=muted>Enable, edit, check health or remove a source.</p></div><button id=collectBtn>Collect news now</button></div><div id=feeds>Loading sources…</div></div>
 <div class=card><div class=top><div><h2>Research & editorial signals</h2><p class=muted>Headline matches are not fact-checks. Verify claims against original reporting.</p></div><select id=categoryFilter aria-label="Filter stories by category"><option value="">All categories</option></select></div><div class=grid><div class=stat><strong id=multiMatches>—</strong><span>Multi-source headline matches</span></div><div class=stat><strong id=oldStories>—</strong><span>Possibly old stories</span></div><div class=stat><strong id=breakingCandidates>—</strong><span>Breaking candidates · verify</span></div><div class=stat><strong id=headlineOnly>—</strong><span>Headline-only records</span></div></div></div>
-<div class=card><h2>Nepali AI writing engine</h2><p class=muted>The Groq Nepali writing engine is configured separately. Test its connection without generating a draft. Approval never publishes to Facebook.</p><div id=aiStatus class=ai-note>Checking Groq configuration…</div><div class=toolbar><button class=secondary id=testGroqConnection>Test Groq connection</button></div><p id=groqTestMessage class=muted role=status aria-live=polite></p></div>
+<div class=card><h2>Nepali AI writing engine</h2><p class=muted>The OpenRouter Nepali writing engine is configured separately. Test its connection without generating a draft. Approval never publishes to Facebook.</p><div id=aiStatus class=ai-note>Checking OpenRouter configuration…</div><div class=toolbar><button class=secondary id=testOpenRouterConnection>Test OpenRouter connection</button></div><p id=openrouterTestMessage class=muted role=status aria-live=polite></p></div>
 <div id=message class=muted role=status aria-live=polite style="min-height:1.5em;margin:12px 0;color:#ffcc80"></div>
 <div class=card><div class=top><div><h2>Editorial desk & draft management</h2><p class=muted>Edit, review, approve or dismiss drafts. Approval never publishes to Facebook.</p></div><button class=secondary id=exportDrafts>Export pending drafts CSV</button></div><div class=toolbar><input id=storySearch placeholder='Search headlines or sources'><select id=statusFilter><option value='all'>All statuses</option><option value='draft'>Pending review</option><option value='approved'>Approved</option><option value='dismissed'>Dismissed</option><option value='no_draft'>No draft</option></select><select id=editorCategory><option value=''>All categories</option></select><button class=secondary id=selectVisible>Select visible</button><button class=danger id=bulkDismiss>Dismiss selected</button></div><p id=editorMessage class=muted role=status aria-live=polite></p><div id=stories>Loading…</div></div>
 <script>
@@ -1310,7 +1317,7 @@ $('stories').innerHTML=visible.map(s=>'<div class=story data-story="'+s.id+'"><l
 }
 
 async function load(){try{const d=await api('/api/admin/status');const m=d.monitoring||{},a=d.analytics||{},c=a.collections||{},ed=a.editorial||{},h=d.system_health||{};$('analyticsRuns').textContent=c.completed_runs??0;$('analyticsNew').textContent=c.new_stories??0;$('analyticsFailed').textContent=c.failed_runs??0;$('analyticsDuration').textContent=c.average_duration_seconds==null?'—':c.average_duration_seconds+' sec';$('analyticsPending').textContent=ed.pending_drafts??0;$('analyticsApproved').textContent=ed.approved_drafts??0;const daily=a.daily_stories||[],maxDaily=Math.max(1,...daily.map(x=>x.stories));$('dailyAnalytics').innerHTML=daily.length?daily.map(x=>'<div class=analytics-row><span>'+esc(x.day)+'</span><div class=analytics-bar><span style="width:'+Math.round(x.stories/maxDaily*100)+'%"></span></div><strong>'+x.stories+'</strong></div>').join(''):'No stories collected in this period.';const top=a.top_sources||[],maxSource=Math.max(1,...top.map(x=>x.stories));$('sourceAnalytics').innerHTML=top.length?top.map(x=>'<div class=analytics-row><span>'+esc(x.source_name)+'</span><div class=analytics-bar><span style="width:'+Math.round(x.stories/maxSource*100)+'%"></span></div><strong>'+x.stories+'</strong></div>').join(''):'No source activity recorded in this period.';$('recentRuns').innerHTML=(a.recent_runs||[]).length?a.recent_runs.map(x=>'<div class=analytics-row><span>'+esc(x.event_type==='collection_finished'?'Completed':'Failed')+' · '+esc(x.created_at||'')+'</span><strong>'+(x.event_type==='collection_finished'?((x.details||{}).new||0)+' new':'See logs')+'</strong></div>').join(''):'No collection history yet.';$('healthDatabase').textContent=h.database||'Unknown';$('healthScheduler').textContent=h.scheduler||'Unknown';$('healthAI').textContent=h.ai||'Unknown';$('healthFacebook').textContent=h.facebook==='connected_read_only'?'Connected (read-only)':h.facebook==='configured_not_tested'?'Configured · not tested':h.facebook==='not_configured'?'Not configured':h.facebook||'Unknown';const fb=d.facebook_connection||{};$('facebookConnectionStatus').textContent=fb.last_test_ok?'Connected · read-only test passed':fb.configured?'Configured · not tested':'Not configured';$('facebookPageIdentity').textContent=fb.last_test_page_name|| (fb.page_id?'Page ID: '+fb.page_id:'Add credentials in Render');$('facebookPublishingMode').textContent=fb.publishing_enabled?'Enabled · manual only':'OFF · safe';facebookManualEnabled=!!fb.publishing_enabled;$('testFacebookConnection').disabled=!fb.configured;$('facebookConnectionMessage').textContent=fb.last_test_at?'Last read-only test: '+new Date(fb.last_test_at).toLocaleString()+' · No post was published.':'The Page access token is read only from Render environment settings and is never displayed here.';const publications=d.facebook_publications||[];$('facebookHistory').innerHTML=publications.length?publications.map(p=>'<div class=analytics-row><span>Story #'+p.story_id+' · '+esc(p.headline)+'<br><small>'+esc(p.updated_at||'')+(p.facebook_post_id?' · Post ID: '+esc(p.facebook_post_id):'')+(p.error?' · '+esc(p.error):'')+'</small></span><strong>'+esc(p.status)+'</strong></div>').join(''):'No Facebook publishing attempts yet.';$('healthSources').textContent=(h.healthy_sources??0)+' / '+(h.enabled_sources??0);$('healthErrors').textContent=h.source_errors??0;$('monitorState').textContent=m.scheduler_running?'Running':'Stopped';$('monitorInterval').textContent=(m.interval_minutes||5)+' min';$('monitorWindow').textContent=(m.window||'05:00–22:55')+' NPT';$('monitorLastRun').textContent=m.last_completed_at?new Date(m.last_completed_at).toLocaleTimeString():'No run yet';$('monitorDetails').textContent=m.last_failed_at&&(!m.last_completed_at||m.last_failed_at>m.last_completed_at)?'Latest run failed: '+(m.last_failure?.error||'Check system logs'):'Last result: '+(m.last_result?m.last_result.checked+' sources checked · '+m.last_result.new+' new stories · '+m.last_result.failed+' source failures':'Waiting for the first completed run')+' · Next scheduled tick: '+(m.next_run_at?new Date(m.next_run_at).toLocaleString():'not scheduled');$('total').textContent=d.summary.total_sources;$('enabled').textContent=d.summary.enabled_sources;$('healthy').textContent=d.summary.healthy_sources;$('storiesCount').textContent=d.summary.stories;
-$('aiStatus').textContent=d.ai.configured?'Groq configured · '+d.ai.model+' · writing engine available':'Groq API key is not configured in Render';
+$('aiStatus').textContent=d.ai.configured?'OpenRouter configured · '+d.ai.model+' · writing engine available':'OpenRouter API key is not configured in Render';
 $('multiMatches').textContent=d.summary.research.multi_source_matches;
 $('oldStories').textContent=d.summary.research.possibly_old;
 $('breakingCandidates').textContent=d.summary.research.breaking_candidates;
@@ -1341,7 +1348,7 @@ else if(action==='restore'){if(!confirm('Restore version '+b.dataset.version+'? 
 $('addForm').addEventListener('submit',async e=>{e.preventDefault();$('addBtn').disabled=true;try{await api('/api/admin/sources','POST',{name:$('sourceName').value,url:$('sourceUrl').value});$('message').textContent='Source added.';$('sourceName').value='';$('sourceUrl').value='';await load()}catch(err){$('message').textContent=err.message}finally{$('addBtn').disabled=false}});
 $('feeds').addEventListener('click',async e=>{const b=e.target.closest('button[data-action]');if(!b)return;const id=b.dataset.id;try{if(b.dataset.action==='toggle'){await api('/api/admin/sources/'+id,'PATCH',{enabled:b.dataset.enabled==='true'})}else if(b.dataset.action==='edit'){const name=prompt('Source name:',b.dataset.name);if(name===null)return;const url=prompt('RSS / Atom feed URL:',b.dataset.url);if(url===null)return;await api('/api/admin/sources/'+id,'PATCH',{name,url})}else if(b.dataset.action==='delete'){if(!confirm('Remove this source? Previously collected stories will remain.'))return;await api('/api/admin/sources/'+id,'DELETE')}await load()}catch(err){alert(err.message)}});
 $('testFacebookConnection').addEventListener('click',async()=>{const b=$('testFacebookConnection');b.disabled=true;b.textContent='Testing…';$('facebookConnectionMessage').textContent='Checking the configured Facebook Page using a read-only request…';try{const result=await api('/api/admin/facebook/test','POST',{});$('facebookConnectionMessage').textContent='Connected successfully to '+result.page_name+' (Page ID '+result.page_id+'). This was a read-only test; nothing was published.';await load()}catch(e){$('facebookConnectionMessage').textContent=e.message}finally{b.disabled=false;b.textContent='Test read-only connection';}});
-$('testGroqConnection').addEventListener('click',async()=>{const b=$('testGroqConnection'),m=$('groqTestMessage');b.disabled=true;b.textContent='Testing…';m.textContent='Sending a small test request to Groq. No news draft will be created.';try{const result=await api('/api/admin/ai/test','POST',{});m.textContent=result.message+' Model: '+result.model+'.'}catch(e){m.textContent=e.message}finally{b.disabled=false;b.textContent='Test Groq connection';}});
+$('testOpenRouterConnection').addEventListener('click',async()=>{const b=$('testOpenRouterConnection'),m=$('openrouterTestMessage');b.disabled=true;b.textContent='Testing…';m.textContent='Sending a small test request to OpenRouter. No news draft will be created.';try{const result=await api('/api/admin/ai/test','POST',{});m.textContent=result.message+' Model: '+result.model+'.'}catch(e){m.textContent=e.message}finally{b.disabled=false;b.textContent='Test OpenRouter connection';}});
 $('collectBtn').addEventListener('click',async()=>{const b=$('collectBtn');b.disabled=true;b.textContent='Collecting…';$('message').textContent='Checking enabled RSS feeds…';try{const d=await api('/api/admin/collect','POST',{});$('message').textContent='Checked '+d.checked+' source(s): '+d.new+' new stories, '+d.matched+' similar-story matches, '+d.duplicates+' duplicates, '+d.failed+' failures.';await load();if(d.failed)alert('Some sources failed. Their error details are shown in Source Health.')}catch(e){$('message').textContent=e.message}finally{b.disabled=false;b.textContent='Collect news now'}});
 load();
 setInterval(load, 60000);
@@ -1510,7 +1517,7 @@ def status():
     system_health = {
         "database": "connected",
         "scheduler": "running" if monitoring["scheduler_running"] else "stopped",
-        "ai": "configured" if bool(os.getenv("GROQ_API_KEY", "").strip()) else "not_configured",
+        "ai": "configured" if bool(os.getenv("OPENROUTER_API_KEY", "").strip()) else "not_configured",
         "facebook": facebook_health,
         "enabled_sources": summary["enabled_sources"],
         "healthy_sources": summary["healthy_sources"],
@@ -1540,9 +1547,9 @@ def status():
         "analytics": analytics,
         "auto": False,
         "ai": {
-            "provider": "Groq",
-            "configured": bool(os.getenv("GROQ_API_KEY", "").strip()),
-            "model": os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+            "provider": "OpenRouter",
+            "configured": bool(os.getenv("OPENROUTER_API_KEY", "").strip()),
+            "model": os.getenv("OPENROUTER_MODEL", "openrouter/free")
         },
         "summary": {**dict(summary), "stories": story_count, "research": dict(research_summary)},
         "categories": [dict(x) for x in categories],
@@ -1735,24 +1742,29 @@ def export_pending_drafts():
 
 @bp.post("/api/admin/ai/test")
 @auth
-def test_groq_connection():
-    """Check Groq connectivity without generating or saving a news draft."""
-    key = os.getenv("GROQ_API_KEY", "").strip()
+def test_openrouter_connection():
+    """Check OpenRouter connectivity without generating or saving a news draft."""
+    key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not key:
-        return jsonify({"ok": False, "error": "Groq API key is not configured in Render. Add GROQ_API_KEY to the service environment."}), 503
-    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b").strip()
-    if not re.fullmatch(r"[A-Za-z0-9._/-]{1,120}", model):
-        return jsonify({"ok": False, "error": "The configured Groq model name is invalid."}), 503
+        return jsonify({"ok": False, "error": "OpenRouter API key is not configured in Render. Add OPENROUTER_API_KEY to the service environment."}), 503
+    model = os.getenv("OPENROUTER_MODEL", "openrouter/free").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._/-]{1,160}", model):
+        return jsonify({"ok": False, "error": "The configured OpenRouter model name is invalid."}), 503
     body = {
         "model": model,
         "messages": [{"role": "user", "content": "Reply with exactly the word OK."}],
         "temperature": 0.2,
-        "max_completion_tokens": 8
+        "max_tokens": 8
     }
     req = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
         data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + key,
+            "HTTP-Referer": "https://nayadrishti-ai-brand-new.onrender.com",
+            "X-OpenRouter-Title": "NayaDrishti AI"
+        },
         method="POST"
     )
     try:
@@ -1761,7 +1773,7 @@ def test_groq_connection():
             if delay:
                 time.sleep(delay)
             try:
-                with urllib.request.urlopen(req, timeout=25) as response:
+                with urllib.request.urlopen(req, timeout=30) as response:
                     result = json.loads(response.read().decode("utf-8"))
                 break
             except urllib.error.HTTPError as exc:
@@ -1773,47 +1785,41 @@ def test_groq_connection():
                     if isinstance(error_data, dict):
                         detail = str(error_data.get("message", "")).strip()
                         provider_code = str(error_data.get("code", "")).strip()
-                        provider_type = str(error_data.get("type", "")).strip()
                     else:
-                        detail = str(error_data or "").strip()
-                        provider_code = ""
-                        provider_type = ""
+                        detail, provider_code = str(error_data).strip(), ""
                 except Exception:
-                    detail = ""
-                    provider_code = ""
-                    provider_type = ""
+                    detail, provider_code = "", ""
                 detail = re.sub(r"\\s+", " ", detail)[:240]
                 if key and detail:
                     detail = detail.replace(key, "[redacted]")
-                diagnostics = [item for item in (provider_code, provider_type) if item]
-                suffix = (" Provider code: " + " / ".join(diagnostics) + ".") if diagnostics else ""
+                suffix = (" Provider code: " + provider_code + ".") if provider_code else ""
                 if detail:
                     suffix += " Provider says: " + detail
-                if exc.code == 429:
-                    message = "Groq rate limit or usage limit reached. Check your Groq account limits." + suffix
+                if exc.code == 402:
+                    message = "OpenRouter account needs credits or the selected model is not available on the current balance." + suffix
+                elif exc.code == 429:
+                    message = "OpenRouter rate or usage limit reached. Check your account limits." + suffix
                 elif exc.code in (400, 401, 403, 404):
-                    message = f"Groq rejected the test request (HTTP {exc.code})." + suffix
+                    message = f"OpenRouter rejected the test request (HTTP {exc.code})." + suffix
                 else:
-                    message = f"Groq is still unavailable after retries (HTTP {exc.code}). Try again later." + suffix
+                    message = f"OpenRouter is temporarily unavailable after retries (HTTP {exc.code}). Try again later." + suffix
                 return jsonify({"ok": False, "error": message}), 502
         if result is None:
-            return jsonify({"ok": False, "error": "Groq did not return a response."}), 502
+            return jsonify({"ok": False, "error": "OpenRouter did not return a response."}), 502
         choices = result.get("choices", [])
         answer = choices[0].get("message", {}).get("content", "") if choices else ""
         if not isinstance(answer, str) or not answer.strip():
-            return jsonify({"ok": False, "error": "Groq responded, but returned no text."}), 502
+            return jsonify({"ok": False, "error": "OpenRouter responded, but returned no text."}), 502
         with conn() as c:
             c.execute(
                 "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
-                ("groq_connection_test", "Groq connection test succeeded; no news draft was generated.", Jsonb({"model": model}))
+                ("openrouter_connection_test", "OpenRouter connection test succeeded; no news draft was generated.", Jsonb({"model": model}))
             )
-        return jsonify({"ok": True, "model": model, "message": "Groq responded successfully. No news draft was generated."})
+        return jsonify({"ok": True, "model": model, "message": "OpenRouter responded successfully. No news draft was generated."})
     except (urllib.error.URLError, TimeoutError):
-        return jsonify({"ok": False, "error": "Could not reach Groq. Please try again later."}), 502
+        return jsonify({"ok": False, "error": "Could not reach OpenRouter. Please try again later."}), 502
     except (ValueError, TypeError, KeyError, IndexError):
-        return jsonify({"ok": False, "error": "Groq returned an unreadable response."}), 502
-
-
+        return jsonify({"ok": False, "error": "OpenRouter returned an unreadable response."}), 502
 @bp.post("/api/admin/stories/<int:sid>/generate-draft")
 @auth
 def generate_story_draft(sid):
@@ -1831,7 +1837,7 @@ def generate_story_draft(sid):
         c.execute(
             "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
             ("ai_draft_generated", "A Nepali AI draft was generated for editorial review.",
-             Jsonb({"story_id": sid, "model": os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"), "provider": "Groq"}))
+             Jsonb({"story_id": sid, "model": os.getenv("OPENROUTER_MODEL", "openrouter/free"), "provider": "OpenRouter"}))
         )
     return jsonify({"ok": True, "story_id": sid, "draft": generated, "review_required": True})
 
