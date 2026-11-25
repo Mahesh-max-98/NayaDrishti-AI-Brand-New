@@ -939,20 +939,82 @@ def publish(sid, manual=False):
 
 
 def cycle():
-    """Collect feeds automatically during the requested Nepal-time monitoring window."""
-    now = datetime.now().astimezone()
-    local = now.astimezone(__import__("zoneinfo").ZoneInfo("Asia/Kathmandu"))
-    if local.hour < 5 or (local.hour > 22 or (local.hour == 22 and local.minute > 55)):
+    """Collect feeds every five minutes during the Nepal-time monitoring window.
+
+    A PostgreSQL session advisory lock prevents duplicate runs if the web
+    service is ever started with more than one process or instance.
+    """
+    local = datetime.now(timezone.utc).astimezone(
+        __import__("zoneinfo").ZoneInfo("Asia/Kathmandu")
+    )
+    if local.hour < 5 or local.hour > 22 or (local.hour == 22 and local.minute > 55):
         return
-    logger.info("Automatic collection cycle started (Nepal time %s).", local.strftime("%H:%M"))
+
+    lock_conn = None
+    lock_id = 734921006
+    started_at = datetime.now(timezone.utc)
     try:
+        lock_conn = conn()
+        acquired = lock_conn.execute(
+            "SELECT pg_try_advisory_lock(%s) AS acquired", (lock_id,)
+        ).fetchone()["acquired"]
+        lock_conn.commit()
+        if not acquired:
+            logger.info("Skipping collection: another NayaDrishti scheduler run holds the lock.")
+            return
+
+        with conn() as c:
+            c.execute(
+                "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+                ("collection_started", "Automatic news collection started.", Jsonb({
+                    "started_at": started_at.isoformat(),
+                    "timezone": "Asia/Kathmandu"
+                }))
+            )
+
         result = collect()
+        duration = round((datetime.now(timezone.utc) - started_at).total_seconds(), 2)
+        with conn() as c:
+            c.execute("""
+                UPDATE activity_logs
+                SET details = details || %s
+                WHERE id = (
+                    SELECT id FROM activity_logs
+                    WHERE event_type='collection_finished'
+                    ORDER BY id DESC LIMIT 1
+                )
+            """, (Jsonb({
+                "duration_seconds": duration,
+                "started_at": started_at.isoformat(),
+                "timezone": "Asia/Kathmandu"
+            }),))
         logger.info(
-            "Automatic collection finished: %s sources, %s new stories, %s failures.",
-            result["checked"], result["new"], result["failed"]
+            "Automatic collection finished: %s sources, %s new stories, %s failures in %ss.",
+            result["checked"], result["new"], result["failed"], duration
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Scheduled news collection failed.")
+        try:
+            with conn() as c:
+                c.execute(
+                    "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+                    ("collection_failed", "Automatic news collection failed.", Jsonb({
+                        "error": str(exc)[:300],
+                        "started_at": started_at.isoformat(),
+                        "timezone": "Asia/Kathmandu"
+                    }))
+                )
+        except Exception:
+            logger.exception("Could not save the automatic collection failure to the database.")
+    finally:
+        if lock_conn is not None:
+            try:
+                lock_conn.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+                lock_conn.commit()
+            except Exception:
+                logger.exception("Could not release the automatic collection lock cleanly.")
+            finally:
+                lock_conn.close()
 
 
 def _repair_research_signals():
@@ -1020,6 +1082,7 @@ PANEL = """<!doctype html><meta name=viewport content='width=device-width,initia
 :root{color-scheme:dark}*{box-sizing:border-box}body{background:#0b1220;color:#eef4ff;font:14px system-ui;margin:0;padding:22px;max-width:1180px;margin:auto}h1{margin:8px 0}h2{margin:0 0 12px}.muted{color:#9aabc2}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.card{background:#152238;border:1px solid #30425c;border-radius:14px;padding:16px;margin:14px 0}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.stat{background:#0e192a;border:1px solid #30425c;padding:12px;border-radius:10px}.stat strong{font-size:23px;display:block}.stat span{color:#9aabc2;font-size:12px}input,button{padding:10px;border-radius:8px;margin:4px;border:1px solid #40536e}input{background:#0b1423;color:white;max-width:100%}button{background:#75e0c0;color:#071521;border:0;font-weight:700;cursor:pointer}button.secondary{background:#263a55;color:#eef4ff;border:1px solid #40536e}button.danger{background:#572e3b;color:#ffe7ed;border:1px solid #87475c}button:disabled{opacity:.5;cursor:wait}.feed{border-top:1px solid #30425c;padding:12px 0;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.feed small{display:block;color:#9aabc2;overflow-wrap:anywhere}.feed-actions{display:flex;gap:4px;flex-wrap:wrap}.pill{font-size:11px;padding:3px 8px;border-radius:20px;background:#263a55}.ok{color:#75e0c0}.bad{color:#ff9eae}.warn{color:#ffd58a}.story{border-top:1px solid #30425c;padding:12px 0}.story h3{margin:0 0 5px;font-size:15px}.story a{color:#8bc4ff}.draft-preview{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1423;border:1px solid #40536e;border-radius:10px;padding:12px;color:#f5f8ff;line-height:1.7}.ai-note{padding:10px;border-radius:10px;background:#0e192a;border:1px solid #30425c}.ai-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}.toolbar input,.toolbar select{min-width:150px}.story-tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0}.editor{width:100%;min-height:150px;background:#0b1423;color:#fff;border:1px solid #40536e;border-radius:10px;padding:12px;font:inherit}.revision{padding:8px;border-top:1px solid #30425c}.draft-preview{max-height:280px;overflow:auto}.story-check{width:auto}.hidden{display:none!important}@media(max-width:700px){body{padding:12px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.feed{align-items:flex-start}}
 </style>
 <div class=top><div><h1>NayaDrishti AI Newsroom</h1><p class=muted>Automatic Nepali news collection · refreshed every 5 minutes</p></div><a href=/admin/logout style=color:#8bc4ff>Sign out</a></div>
+<div class=card><h2>Automatic monitoring</h2><div class=grid><div class=stat><strong id=monitorState>—</strong><span>Scheduler status</span></div><div class=stat><strong id=monitorInterval>5 min</strong><span>Collection interval</span></div><div class=stat><strong id=monitorWindow>05:00–22:55</strong><span>Nepal time window</span></div><div class=stat><strong id=monitorLastRun>—</strong><span>Last completed run</span></div></div><p id=monitorDetails class=muted>Checking automatic collection status…</p></div>
 <div class=grid><div class=stat><strong id=total>—</strong><span>Total sources</span></div><div class=stat><strong id=enabled>—</strong><span>Enabled sources</span></div><div class=stat><strong id=healthy>—</strong><span>Healthy sources</span></div><div class=stat><strong id=storiesCount>—</strong><span>Collected stories</span></div></div>
 <div class=card><h2>Automatic source setup</h2><p class=muted>NayaDrishti preloads available public Nepali news RSS feeds. You do not need to enter feed links. You can still add or manage sources below if needed.</p><form id=addForm><input id=sourceName placeholder='Source name' required maxlength=100><input id=sourceUrl placeholder='https://example.com/feed' required style='width:min(560px,95%)'><button id=addBtn>Add source</button></form><p id=message class=muted aria-live=polite></p></div>
 <div class=card><div class=top><div><h2>News sources</h2><p class=muted>Enable, edit, check health or remove a source.</p></div><button id=collectBtn>Collect news now</button></div><div id=feeds>Loading sources…</div></div>
@@ -1038,7 +1101,7 @@ const visible=allStories.filter(s=>(!category||s.category===category)&&(!term||(
 $('stories').innerHTML=visible.map(s=>'<div class=story data-story="'+s.id+'"><label><input class=story-check type=checkbox value="'+s.id+'"> Select</label><h3>'+esc(s.title)+'</h3><p class=muted>'+esc(s.category||'Other')+' · '+esc(s.source_name)+' · '+s.source_count+' source match(es) · Status: '+esc(s.status)+'</p><p>'+esc(s.summary||'No article summary supplied by publisher.')+'</p><p class=muted>Evidence: '+esc(s.evidence_status||'single_source')+' · '+esc((s.research_flags||[]).join(' · '))+(s.is_breaking_candidate?' · BREAKING CANDIDATE — editorial verification required':'')+'</p><p class=muted>Publication: '+esc(s.published_at||'Unknown')+'</p><div>'+((s.provenance||[]).map(p=>'<p><a href="'+esc(p.article_url)+'" target=_blank rel=noopener>'+esc(p.source_name)+' — original report</a></p>').join(''))+'</div>'+(s.draft?'<div><span class=pill '+(s.status==='approved'?'ok':'')+'>'+esc(s.status==='approved'?'Approved · not published':s.status==='dismissed'?'Dismissed':'Pending editorial review')+'</span><pre class=draft-preview>'+esc(s.draft)+'</pre><div class=story-tools><button class=secondary data-action="edit-draft='+s.id+'">Edit draft</button><button class=secondary data-action="history='+s.id+'">Version history</button>'+(s.status==='approved'?'':'<button data-action="approve='+s.id+'">Approve</button>')+(s.status==='dismissed'?'':'<button class=danger data-action="dismiss='+s.id+'">Dismiss</button>')+'</div><div id=editor-'+s.id+' class=hidden><textarea class=editor id=text-'+s.id+'>'+esc(s.draft)+'</textarea><div class=story-tools><button data-action="save='+s.id+'">Save changes</button><button class=secondary data-action="cancel='+s.id+'">Cancel</button></div></div><div id=history-'+s.id+'></div></div>':'<p class=muted>No saved draft. This story can be researched and reviewed, but there is no draft to approve.</p><button class=danger data-action="dismiss='+s.id+'">Dismiss story</button>')+'</div>').join('')||'<p class=muted>No stories match these filters.</p>';
 }
 
-async function load(){try{const d=await api('/api/admin/status');$('total').textContent=d.summary.total_sources;$('enabled').textContent=d.summary.enabled_sources;$('healthy').textContent=d.summary.healthy_sources;$('storiesCount').textContent=d.summary.stories;
+async function load(){try{const d=await api('/api/admin/status');const m=d.monitoring||{};$('monitorState').textContent=m.scheduler_running?'Running':'Stopped';$('monitorInterval').textContent=(m.interval_minutes||5)+' min';$('monitorWindow').textContent=(m.window||'05:00–22:55')+' NPT';$('monitorLastRun').textContent=m.last_completed_at?new Date(m.last_completed_at).toLocaleTimeString():'No run yet';$('monitorDetails').textContent=m.last_failed_at&&(!m.last_completed_at||m.last_failed_at>m.last_completed_at)?'Latest run failed: '+(m.last_failure?.error||'Check system logs'):'Last result: '+(m.last_result?m.last_result.checked+' sources checked · '+m.last_result.new+' new stories · '+m.last_result.failed+' source failures':'Waiting for the first completed run')+' · Next scheduled tick: '+(m.next_run_at?new Date(m.next_run_at).toLocaleString():'not scheduled');$('total').textContent=d.summary.total_sources;$('enabled').textContent=d.summary.enabled_sources;$('healthy').textContent=d.summary.healthy_sources;$('storiesCount').textContent=d.summary.stories;
 $('aiStatus').textContent=d.ai.configured?'Gemini configured · '+d.ai.model+' · writing engine available':'Gemini API key is not configured in Render';
 $('multiMatches').textContent=d.summary.research.multi_source_matches;
 $('oldStories').textContent=d.summary.research.possibly_old;
@@ -1147,8 +1210,28 @@ def status():
             "SELECT category,COUNT(*)::int AS count FROM stories GROUP BY category ORDER BY category"
         ).fetchall()
         story_count = c.execute("SELECT COUNT(*)::int AS count FROM stories").fetchone()["count"]
+        monitoring_row = c.execute("""
+            SELECT
+              (SELECT created_at FROM activity_logs WHERE event_type='collection_finished' ORDER BY id DESC LIMIT 1) AS last_completed_at,
+              (SELECT details FROM activity_logs WHERE event_type='collection_finished' ORDER BY id DESC LIMIT 1) AS last_result,
+              (SELECT created_at FROM activity_logs WHERE event_type='collection_failed' ORDER BY id DESC LIMIT 1) AS last_failed_at,
+              (SELECT details FROM activity_logs WHERE event_type='collection_failed' ORDER BY id DESC LIMIT 1) AS last_failure
+        """).fetchone()
+    job = scheduler.get_job("automatic-news-collection")
+    monitoring = {
+        "scheduler_running": bool(scheduler.running),
+        "timezone": "Asia/Kathmandu",
+        "interval_minutes": 5,
+        "window": "05:00–22:55",
+        "next_run_at": job.next_run_time.isoformat() if job and job.next_run_time else None,
+        "last_completed_at": monitoring_row["last_completed_at"].isoformat() if monitoring_row["last_completed_at"] else None,
+        "last_result": dict(monitoring_row["last_result"]) if monitoring_row["last_result"] else None,
+        "last_failed_at": monitoring_row["last_failed_at"].isoformat() if monitoring_row["last_failed_at"] else None,
+        "last_failure": dict(monitoring_row["last_failure"]) if monitoring_row["last_failure"] else None
+    }
     return jsonify({
         "facebook": False,
+        "monitoring": monitoring,
         "auto": False,
         "ai": {
             "provider": "Gemini",
