@@ -8,6 +8,7 @@ import re
 import hashlib
 import logging
 import socket
+import time
 import ipaddress
 from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor
@@ -1744,8 +1745,24 @@ def test_gemini_connection():
         method="POST"
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as response:
-            result = json.loads(response.read().decode("utf-8"))
+        result = None
+        last_http_error = None
+        # Retry only transient server errors, with bounded exponential backoff.
+        for attempt, delay in enumerate((0, 2, 4, 8), start=1):
+            if delay:
+                time.sleep(delay)
+            try:
+                with urllib.request.urlopen(req, timeout=20) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                last_http_error = None
+                break
+            except urllib.error.HTTPError as exc:
+                last_http_error = exc
+                if exc.code in (500, 502, 503, 504) and attempt < 4:
+                    continue
+                raise
+        if last_http_error is not None and result is None:
+            raise last_http_error
         candidates = result.get("candidates", [])
         parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
         if not any(isinstance(part, dict) and str(part.get("text", "")).strip() for part in parts):
@@ -1764,11 +1781,11 @@ def test_gemini_connection():
             message = f"Gemini rejected the test request (HTTP {exc.code}). Check the model and API access in Render."
             status = 502
         else:
-            message = f"Gemini is temporarily unavailable (HTTP {exc.code})."
+            message = f"Gemini is still unavailable after automatic retries (HTTP {exc.code}). Check Google's service status and try again later."
             status = 502
         return jsonify({"ok": False, "error": message}), status
     except (urllib.error.URLError, TimeoutError):
-        return jsonify({"ok": False, "error": "Could not reach Gemini. Please try again later."}), 502
+        return jsonify({"ok": False, "error": "Could not reach Gemini after the connection attempt. Please try again later."}), 502
     except (ValueError, TypeError, KeyError, IndexError):
         return jsonify({"ok": False, "error": "Gemini returned an unreadable response."}), 502
 
