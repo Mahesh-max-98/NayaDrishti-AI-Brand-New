@@ -247,7 +247,8 @@ def init():
         c.execute("INSERT INTO schema_migrations(version) VALUES(4) ON CONFLICT(version) DO NOTHING")
         c.execute("INSERT INTO schema_migrations(version) VALUES(8) ON CONFLICT(version) DO NOTHING")
 
-def database_status():    try:
+def database_status():
+    try:
         with conn() as c:
             row = c.execute("""
                 SELECT current_database() AS database_name,
