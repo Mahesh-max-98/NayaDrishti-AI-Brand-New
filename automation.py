@@ -44,7 +44,7 @@ def conn():
 # RSS feeds are used where available. For outlets without a verified feed,
 # the collector reads the public homepage and extracts same-site article links.
 DEFAULT_SOURCES = [
-    ("RONB / Routine of Nepal Banda", "https://ronbpost.com/"),
+    ("RONB / Routine of Nepal Banda", "https://www.youtube.com/feeds/videos.xml?channel_id=UC2rariKHGBaLf0qmhWQv3KQ"),
     ("BBC Nepali", "https://www.bbc.com/nepali"),
     ("Onlinekhabar", "https://www.onlinekhabar.com/feed"),
     ("OK Khabar", "https://okkhabar.com/"),
@@ -56,17 +56,17 @@ DEFAULT_SOURCES = [
     ("Setopati", "https://www.setopati.com/feed"),
     ("Nagarik News", "https://nagariknews.nagariknetwork.com/feed"),
     ("Gorkhapatra", "https://gorkhapatraonline.com/rss"),
-    ("Ujyaalo Online", "https://www.ujyaaloonline.com/"),
-    ("Thaha Khabar", "https://thahakhabar.com/"),
-    ("Nepal Samaya", "https://nepalsamaya.com/"),
-    ("NEB Official Notices", "https://neb.gov.np/news-notices"),
+    ("Ujyaalo Online", "https://ujyaaloonline.com/rss"),
+    ("Thaha Khabar", "https://thahakhabar.com/rss/"),
+    ("Nepal Samaya", "https://nepalsamaya.com/feed"),
+    ("NEB Official Notices", "https://neb.gov.np/"),
     ("Government of Nepal Portal", "https://nepal.gov.np/"),
     ("Artha Sarokar", "https://arthasarokar.com/feed"),
     ("Rajdhani Daily", "https://rajdhanidaily.com/feed"),
     ("News of Nepal", "https://newsofnepal.com/feed"),
     ("Techmandu", "https://techmandu.com/feed"),
     ("The Rising Nepal (Government-owned)", "https://risingnepaldaily.com/"),
-    ("Khabarhub", "https://khabarhub.com/"),
+    ("Khabarhub", "https://www.khabarhub.com/feed/"),
     ("Nepal Press", "https://nepalpress.com/"),
     ("myRepublica", "https://myrepublica.nagariknetwork.com/"),
 ]
@@ -78,15 +78,20 @@ def seed_default_sources():
         # Remove duplicate URL variants so each publisher has one source row.
         for name, keep_url, duplicate_urls in (
             ("Laliguras Media Network", "https://www.laligurash.com/", ["https://english.laligurash.com/"]),
-            ("Nagarik News", "https://nagariknews.nagariknetwork.com/feed", ["https://nagariknews.nagariknetwork/feed", "https://nagariknews.nagariknetwork.com/"]),
-            ("RONB / Routine of Nepal Banda", "https://ronbpost.com/", ["https://www.ronbpost.com/"]),
+            ("Nagarik News", "https://nagariknews.nagariknetwork.com/feed", ["https://nagariknews.nagariknetwork/feed", "https://nagariknews.nagariknetwork.com/", "https://nagariknews.nagariknetwork.com.com/feed"]),
+            ("RONB / Routine of Nepal Banda", "https://www.youtube.com/feeds/videos.xml?channel_id=UC2rariKHGBaLf0qmhWQv3KQ", ["https://ronbpost.com/", "https://www.ronbpost.com/"]),
+            ("Khabarhub", "https://www.khabarhub.com/feed/", ["https://khabarhub.com/"]),
+            ("Nepal Samaya", "https://nepalsamaya.com/feed", ["https://nepalsamaya.com/"]),
+            ("NEB Official Notices", "https://neb.gov.np/", ["https://neb.gov.np/news-notices"]),
+            ("Thaha Khabar", "https://thahakhabar.com/rss/", ["https://thahakhabar.com/"]),
+            ("Ujyaalo Online", "https://ujyaaloonline.com/rss", ["https://www.ujyaaloonline.com/"]),
         ):
             for duplicate_url in duplicate_urls:
                 c.execute("DELETE FROM sources WHERE url=%s AND EXISTS (SELECT 1 FROM sources WHERE url=%s)", (duplicate_url, keep_url))
-            c.execute(
-                "UPDATE sources SET name=%s,url=%s,last_checked=NULL,last_success=NULL,last_error=NULL,last_item_count=0,consecutive_failures=0 WHERE url=%s AND NOT EXISTS (SELECT 1 FROM sources WHERE url=%s)",
-                (name, keep_url, duplicate_urls[0], keep_url)
-            )
+                c.execute(
+                    "UPDATE sources SET name=%s,url=%s,last_checked=NULL,last_success=NULL,last_error=NULL,last_item_count=0,consecutive_failures=0 WHERE name=%s AND url=%s AND NOT EXISTS (SELECT 1 FROM sources WHERE url=%s)",
+                    (name, keep_url, name, duplicate_url, keep_url)
+                )
         for name, url in DEFAULT_SOURCES:
             c.execute(
                 "INSERT INTO sources(name,url) VALUES(%s,%s) ON CONFLICT(url) DO UPDATE SET name=EXCLUDED.name",
