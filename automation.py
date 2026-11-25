@@ -383,9 +383,18 @@ class _HomepageLinks(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         if tag == "a":
-            href = dict(attrs).get("href", "")
+            item = {str(k).lower(): (v or "") for k, v in attrs}
+            href = item.get("href", "")
             if href:
-                self.current = {"href": urllib.parse.urljoin(self.base_url, href), "text": []}
+                self.current = {
+                    "href": urllib.parse.urljoin(self.base_url, href),
+                    "text": [],
+                    "fallback": item.get("aria-label") or item.get("title") or item.get("data-title") or ""
+                }
+        elif tag == "img" and self.current:
+            alt = dict(attrs).get("alt", "")
+            if alt:
+                self.current["text"].append(alt)
 
     def handle_data(self, data):
         if self.current is not None:
@@ -394,7 +403,7 @@ class _HomepageLinks(HTMLParser):
     def handle_endtag(self, tag):
         if tag != "a" or self.current is None:
             return
-        title = _plain_text(" ".join(self.current["text"]))
+        title = _plain_text(" ".join(self.current["text"]) or self.current.get("fallback", ""))
         link = self.current["href"]
         self.current = None
         parsed = urllib.parse.urlsplit(link)
@@ -421,7 +430,7 @@ def _fetch_feed(url):
     )
     candidates = [url]
     if not is_feed_path:
-        for fallback_path in ("/feed", "/rss", "/rss.xml"):
+        for fallback_path in ("/feed", "/feed/", "/rss", "/rss/", "/rss.xml", "/atom.xml"):
             candidate = urllib.parse.urljoin(base, fallback_path.lstrip("/"))
             if candidate not in candidates:
                 candidates.append(candidate)
