@@ -414,7 +414,7 @@ def collect():
                     result["duplicates"] += 1
                     continue
                 outcome = add(title, summary, link, feed["name"])
-                result[outcome] += 1
+                result["duplicates" if outcome == "duplicate" else outcome] += 1
             with conn() as c:
                 c.execute("""
                     UPDATE sources
