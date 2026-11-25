@@ -1079,10 +1079,12 @@ if DATABASE_INITIALIZED:
 
 LOGIN = """<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>Admin login</title><style>body{background:#0b1220;color:white;font:16px system-ui;display:grid;place-items:center;min-height:90vh}.box{background:#152238;padding:28px;border-radius:16px}input,button{padding:12px;margin:6px;border-radius:8px}</style><div class=box><h2>NayaDrishti Admin</h2><p>{{error}}</p><form method=post><input name=password type=password placeholder='Admin password' required><button>Sign in</button></form></div>"""
 PANEL = """<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>NayaDrishti Newsroom</title><style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{background:#0b1220;color:#eef4ff;font:14px system-ui;margin:0;padding:22px;max-width:1180px;margin:auto}h1{margin:8px 0}h2{margin:0 0 12px}.muted{color:#9aabc2}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.card{background:#152238;border:1px solid #30425c;border-radius:14px;padding:16px;margin:14px 0}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.stat{background:#0e192a;border:1px solid #30425c;padding:12px;border-radius:10px}.stat strong{font-size:23px;display:block}.stat span{color:#9aabc2;font-size:12px}input,button{padding:10px;border-radius:8px;margin:4px;border:1px solid #40536e}input{background:#0b1423;color:white;max-width:100%}button{background:#75e0c0;color:#071521;border:0;font-weight:700;cursor:pointer}button.secondary{background:#263a55;color:#eef4ff;border:1px solid #40536e}button.danger{background:#572e3b;color:#ffe7ed;border:1px solid #87475c}button:disabled{opacity:.5;cursor:wait}.feed{border-top:1px solid #30425c;padding:12px 0;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.feed small{display:block;color:#9aabc2;overflow-wrap:anywhere}.feed-actions{display:flex;gap:4px;flex-wrap:wrap}.pill{font-size:11px;padding:3px 8px;border-radius:20px;background:#263a55}.ok{color:#75e0c0}.bad{color:#ff9eae}.warn{color:#ffd58a}.story{border-top:1px solid #30425c;padding:12px 0}.story h3{margin:0 0 5px;font-size:15px}.story a{color:#8bc4ff}.draft-preview{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1423;border:1px solid #40536e;border-radius:10px;padding:12px;color:#f5f8ff;line-height:1.7}.ai-note{padding:10px;border-radius:10px;background:#0e192a;border:1px solid #30425c}.ai-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}.toolbar input,.toolbar select{min-width:150px}.story-tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0}.editor{width:100%;min-height:150px;background:#0b1423;color:#fff;border:1px solid #40536e;border-radius:10px;padding:12px;font:inherit}.revision{padding:8px;border-top:1px solid #30425c}.draft-preview{max-height:280px;overflow:auto}.story-check{width:auto}.hidden{display:none!important}@media(max-width:700px){body{padding:12px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.feed{align-items:flex-start}}
+:root{color-scheme:dark}*{box-sizing:border-box}body{background:#0b1220;color:#eef4ff;font:14px system-ui;margin:0;padding:22px;max-width:1180px;margin:auto}h1{margin:8px 0}h2{margin:0 0 12px}.muted{color:#9aabc2}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.card{background:#152238;border:1px solid #30425c;border-radius:14px;padding:16px;margin:14px 0}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.stat{background:#0e192a;border:1px solid #30425c;padding:12px;border-radius:10px}.stat strong{font-size:23px;display:block}.stat span{color:#9aabc2;font-size:12px}input,button{padding:10px;border-radius:8px;margin:4px;border:1px solid #40536e}input{background:#0b1423;color:white;max-width:100%}button{background:#75e0c0;color:#071521;border:0;font-weight:700;cursor:pointer}button.secondary{background:#263a55;color:#eef4ff;border:1px solid #40536e}button.danger{background:#572e3b;color:#ffe7ed;border:1px solid #87475c}button:disabled{opacity:.5;cursor:wait}.feed{border-top:1px solid #30425c;padding:12px 0;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.feed small{display:block;color:#9aabc2;overflow-wrap:anywhere}.feed-actions{display:flex;gap:4px;flex-wrap:wrap}.pill{font-size:11px;padding:3px 8px;border-radius:20px;background:#263a55}.ok{color:#75e0c0}.bad{color:#ff9eae}.warn{color:#ffd58a}.story{border-top:1px solid #30425c;padding:12px 0}.story h3{margin:0 0 5px;font-size:15px}.story a{color:#8bc4ff}.draft-preview{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1423;border:1px solid #40536e;border-radius:10px;padding:12px;color:#f5f8ff;line-height:1.7}.ai-note{padding:10px;border-radius:10px;background:#0e192a;border:1px solid #30425c}.ai-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}.toolbar input,.toolbar select{min-width:150px}.story-tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0}.editor{width:100%;min-height:150px;background:#0b1423;color:#fff;border:1px solid #40536e;border-radius:10px;padding:12px;font:inherit}.revision{padding:8px;border-top:1px solid #30425c}.draft-preview{max-height:280px;overflow:auto}.story-check{width:auto}.analytics-columns{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:16px}.analytics-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #30425c}.analytics-bar{height:8px;background:#253d59;border-radius:99px;overflow:hidden;min-width:80px;flex:1}.analytics-bar span{display:block;height:100%;background:#75e0c0;border-radius:99px}.hidden{display:none!important}@media(max-width:700px){.analytics-columns{grid-template-columns:1fr}}@media(max-width:700px){body{padding:12px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.feed{align-items:flex-start}}
 </style>
 <div class=top><div><h1>NayaDrishti AI Newsroom</h1><p class=muted>Automatic Nepali news collection · refreshed every 5 minutes</p></div><a href=/admin/logout style=color:#8bc4ff>Sign out</a></div>
 <div class=card><h2>Automatic monitoring</h2><div class=grid><div class=stat><strong id=monitorState>—</strong><span>Scheduler status</span></div><div class=stat><strong id=monitorInterval>5 min</strong><span>Collection interval</span></div><div class=stat><strong id=monitorWindow>05:00–22:55</strong><span>Nepal time window</span></div><div class=stat><strong id=monitorLastRun>—</strong><span>Last completed run</span></div></div><p id=monitorDetails class=muted>Checking automatic collection status…</p></div>
+<div class=card><h2>Analytics · last 7 days</h2><div class=grid><div class=stat><strong id=analyticsRuns>—</strong><span>Completed collection runs</span></div><div class=stat><strong id=analyticsNew>—</strong><span>New stories collected</span></div><div class=stat><strong id=analyticsFailed>—</strong><span>Failed collection runs</span></div><div class=stat><strong id=analyticsDuration>—</strong><span>Average run duration</span></div><div class=stat><strong id=analyticsPending>—</strong><span>Pending drafts</span></div><div class=stat><strong id=analyticsApproved>—</strong><span>Approved drafts</span></div></div><div class=analytics-columns><div><h3>Daily collected stories</h3><div id=dailyAnalytics class=muted>Loading…</div></div><div><h3>Top contributing sources</h3><div id=sourceAnalytics class=muted>Loading…</div></div></div><h3>Recent collection activity</h3><div id=recentRuns class=muted>Loading…</div></div>
+<div class=card><h2>System health</h2><div class=grid><div class=stat><strong id=healthDatabase>—</strong><span>PostgreSQL</span></div><div class=stat><strong id=healthScheduler>—</strong><span>Scheduler</span></div><div class=stat><strong id=healthAI>—</strong><span>Gemini configuration</span></div><div class=stat><strong id=healthFacebook>—</strong><span>Facebook publishing</span></div><div class=stat><strong id=healthSources>—</strong><span>Healthy sources</span></div><div class=stat><strong id=healthErrors>—</strong><span>Source errors</span></div></div><p class=muted>Health indicators show configuration and service state; they do not guarantee external AI or publisher availability.</p></div>
 <div class=grid><div class=stat><strong id=total>—</strong><span>Total sources</span></div><div class=stat><strong id=enabled>—</strong><span>Enabled sources</span></div><div class=stat><strong id=healthy>—</strong><span>Healthy sources</span></div><div class=stat><strong id=storiesCount>—</strong><span>Collected stories</span></div></div>
 <div class=card><h2>Automatic source setup</h2><p class=muted>NayaDrishti preloads available public Nepali news RSS feeds. You do not need to enter feed links. You can still add or manage sources below if needed.</p><form id=addForm><input id=sourceName placeholder='Source name' required maxlength=100><input id=sourceUrl placeholder='https://example.com/feed' required style='width:min(560px,95%)'><button id=addBtn>Add source</button></form><p id=message class=muted aria-live=polite></p></div>
 <div class=card><div class=top><div><h2>News sources</h2><p class=muted>Enable, edit, check health or remove a source.</p></div><button id=collectBtn>Collect news now</button></div><div id=feeds>Loading sources…</div></div>
@@ -1101,7 +1103,7 @@ const visible=allStories.filter(s=>(!category||s.category===category)&&(!term||(
 $('stories').innerHTML=visible.map(s=>'<div class=story data-story="'+s.id+'"><label><input class=story-check type=checkbox value="'+s.id+'"> Select</label><h3>'+esc(s.title)+'</h3><p class=muted>'+esc(s.category||'Other')+' · '+esc(s.source_name)+' · '+s.source_count+' source match(es) · Status: '+esc(s.status)+'</p><p>'+esc(s.summary||'No article summary supplied by publisher.')+'</p><p class=muted>Evidence: '+esc(s.evidence_status||'single_source')+' · '+esc((s.research_flags||[]).join(' · '))+(s.is_breaking_candidate?' · BREAKING CANDIDATE — editorial verification required':'')+'</p><p class=muted>Publication: '+esc(s.published_at||'Unknown')+'</p><div>'+((s.provenance||[]).map(p=>'<p><a href="'+esc(p.article_url)+'" target=_blank rel=noopener>'+esc(p.source_name)+' — original report</a></p>').join(''))+'</div>'+(s.draft?'<div><span class=pill '+(s.status==='approved'?'ok':'')+'>'+esc(s.status==='approved'?'Approved · not published':s.status==='dismissed'?'Dismissed':'Pending editorial review')+'</span><pre class=draft-preview>'+esc(s.draft)+'</pre><div class=story-tools><button class=secondary data-action="edit-draft='+s.id+'">Edit draft</button><button class=secondary data-action="history='+s.id+'">Version history</button>'+(s.status==='approved'?'':'<button data-action="approve='+s.id+'">Approve</button>')+(s.status==='dismissed'?'':'<button class=danger data-action="dismiss='+s.id+'">Dismiss</button>')+'</div><div id=editor-'+s.id+' class=hidden><textarea class=editor id=text-'+s.id+'>'+esc(s.draft)+'</textarea><div class=story-tools><button data-action="save='+s.id+'">Save changes</button><button class=secondary data-action="cancel='+s.id+'">Cancel</button></div></div><div id=history-'+s.id+'></div></div>':'<p class=muted>No saved draft. This story can be researched and reviewed, but there is no draft to approve.</p><button class=danger data-action="dismiss='+s.id+'">Dismiss story</button>')+'</div>').join('')||'<p class=muted>No stories match these filters.</p>';
 }
 
-async function load(){try{const d=await api('/api/admin/status');const m=d.monitoring||{};$('monitorState').textContent=m.scheduler_running?'Running':'Stopped';$('monitorInterval').textContent=(m.interval_minutes||5)+' min';$('monitorWindow').textContent=(m.window||'05:00–22:55')+' NPT';$('monitorLastRun').textContent=m.last_completed_at?new Date(m.last_completed_at).toLocaleTimeString():'No run yet';$('monitorDetails').textContent=m.last_failed_at&&(!m.last_completed_at||m.last_failed_at>m.last_completed_at)?'Latest run failed: '+(m.last_failure?.error||'Check system logs'):'Last result: '+(m.last_result?m.last_result.checked+' sources checked · '+m.last_result.new+' new stories · '+m.last_result.failed+' source failures':'Waiting for the first completed run')+' · Next scheduled tick: '+(m.next_run_at?new Date(m.next_run_at).toLocaleString():'not scheduled');$('total').textContent=d.summary.total_sources;$('enabled').textContent=d.summary.enabled_sources;$('healthy').textContent=d.summary.healthy_sources;$('storiesCount').textContent=d.summary.stories;
+async function load(){try{const d=await api('/api/admin/status');const m=d.monitoring||{},a=d.analytics||{},c=a.collections||{},ed=a.editorial||{},h=d.system_health||{};$('analyticsRuns').textContent=c.completed_runs??0;$('analyticsNew').textContent=c.new_stories??0;$('analyticsFailed').textContent=c.failed_runs??0;$('analyticsDuration').textContent=c.average_duration_seconds==null?'—':c.average_duration_seconds+' sec';$('analyticsPending').textContent=ed.pending_drafts??0;$('analyticsApproved').textContent=ed.approved_drafts??0;const daily=a.daily_stories||[],maxDaily=Math.max(1,...daily.map(x=>x.stories));$('dailyAnalytics').innerHTML=daily.length?daily.map(x=>'<div class=analytics-row><span>'+esc(x.day)+'</span><div class=analytics-bar><span style="width:'+Math.round(x.stories/maxDaily*100)+'%"></span></div><strong>'+x.stories+'</strong></div>').join(''):'No stories collected in this period.';const top=a.top_sources||[],maxSource=Math.max(1,...top.map(x=>x.stories));$('sourceAnalytics').innerHTML=top.length?top.map(x=>'<div class=analytics-row><span>'+esc(x.source_name)+'</span><div class=analytics-bar><span style="width:'+Math.round(x.stories/maxSource*100)+'%"></span></div><strong>'+x.stories+'</strong></div>').join(''):'No source activity recorded in this period.';$('recentRuns').innerHTML=(a.recent_runs||[]).length?a.recent_runs.map(x=>'<div class=analytics-row><span>'+esc(x.event_type==='collection_finished'?'Completed':'Failed')+' · '+esc(x.created_at||'')+'</span><strong>'+(x.event_type==='collection_finished'?((x.details||{}).new||0)+' new':'See logs')+'</strong></div>').join(''):'No collection history yet.';$('healthDatabase').textContent=h.database||'Unknown';$('healthScheduler').textContent=h.scheduler||'Unknown';$('healthAI').textContent=h.ai||'Unknown';$('healthFacebook').textContent=h.facebook==='disabled_until_phase_9'?'Disabled (Phase 9)':h.facebook||'Unknown';$('healthSources').textContent=(h.healthy_sources??0)+' / '+(h.enabled_sources??0);$('healthErrors').textContent=h.source_errors??0;$('monitorState').textContent=m.scheduler_running?'Running':'Stopped';$('monitorInterval').textContent=(m.interval_minutes||5)+' min';$('monitorWindow').textContent=(m.window||'05:00–22:55')+' NPT';$('monitorLastRun').textContent=m.last_completed_at?new Date(m.last_completed_at).toLocaleTimeString():'No run yet';$('monitorDetails').textContent=m.last_failed_at&&(!m.last_completed_at||m.last_failed_at>m.last_completed_at)?'Latest run failed: '+(m.last_failure?.error||'Check system logs'):'Last result: '+(m.last_result?m.last_result.checked+' sources checked · '+m.last_result.new+' new stories · '+m.last_result.failed+' source failures':'Waiting for the first completed run')+' · Next scheduled tick: '+(m.next_run_at?new Date(m.next_run_at).toLocaleString():'not scheduled');$('total').textContent=d.summary.total_sources;$('enabled').textContent=d.summary.enabled_sources;$('healthy').textContent=d.summary.healthy_sources;$('storiesCount').textContent=d.summary.stories;
 $('aiStatus').textContent=d.ai.configured?'Gemini configured · '+d.ai.model+' · writing engine available':'Gemini API key is not configured in Render';
 $('multiMatches').textContent=d.summary.research.multi_source_matches;
 $('oldStories').textContent=d.summary.research.possibly_old;
@@ -1217,6 +1219,45 @@ def status():
               (SELECT created_at FROM activity_logs WHERE event_type='collection_failed' ORDER BY id DESC LIMIT 1) AS last_failed_at,
               (SELECT details FROM activity_logs WHERE event_type='collection_failed' ORDER BY id DESC LIMIT 1) AS last_failure
         """).fetchone()
+        analytics_row = c.execute("""
+            SELECT
+              COUNT(*) FILTER (WHERE event_type='collection_finished')::int AS completed_runs,
+              COUNT(*) FILTER (WHERE event_type='collection_failed')::int AS failed_runs,
+              COALESCE(SUM(CASE WHEN event_type='collection_finished' THEN COALESCE((details->>'new')::int,0) ELSE 0 END),0)::int AS new_stories,
+              ROUND(AVG(NULLIF(details->>'duration_seconds','')::numeric) FILTER (WHERE event_type='collection_finished'),1) AS average_duration_seconds
+            FROM activity_logs
+            WHERE event_type IN ('collection_finished','collection_failed')
+              AND created_at >= NOW() - INTERVAL '7 days'
+        """).fetchone()
+        editorial_row = c.execute("""
+            SELECT
+              COUNT(*)::int AS all_stories,
+              COUNT(*) FILTER (WHERE draft <> '' AND status='draft')::int AS pending_drafts,
+              COUNT(*) FILTER (WHERE status='approved')::int AS approved_drafts,
+              COUNT(*) FILTER (WHERE status='dismissed')::int AS dismissed_stories,
+              COUNT(*) FILTER (WHERE post_id IS NOT NULL OR published_at IS NOT NULL OR published IS NOT NULL)::int AS published_stories
+            FROM stories
+        """).fetchone()
+        daily_rows = c.execute("""
+            SELECT to_char((created AT TIME ZONE 'Asia/Kathmandu')::date,'DD Mon') AS day,
+                   COUNT(*)::int AS stories
+            FROM stories
+            WHERE created >= NOW() - INTERVAL '7 days'
+            GROUP BY (created AT TIME ZONE 'Asia/Kathmandu')::date
+            ORDER BY (created AT TIME ZONE 'Asia/Kathmandu')::date
+        """).fetchall()
+        top_source_rows = c.execute("""
+            SELECT source_name,COUNT(*)::int AS stories
+            FROM story_sources
+            WHERE collected_at >= NOW() - INTERVAL '7 days'
+            GROUP BY source_name ORDER BY stories DESC,source_name LIMIT 5
+        """).fetchall()
+        recent_run_rows = c.execute("""
+            SELECT event_type,message,details,created_at
+            FROM activity_logs
+            WHERE event_type IN ('collection_finished','collection_failed')
+            ORDER BY id DESC LIMIT 8
+        """).fetchall()
     job = scheduler.get_job("automatic-news-collection")
     monitoring = {
         "scheduler_running": bool(scheduler.running),
@@ -1229,9 +1270,32 @@ def status():
         "last_failed_at": monitoring_row["last_failed_at"].isoformat() if monitoring_row["last_failed_at"] else None,
         "last_failure": dict(monitoring_row["last_failure"]) if monitoring_row["last_failure"] else None
     }
+    system_health = {
+        "database": "connected",
+        "scheduler": "running" if monitoring["scheduler_running"] else "stopped",
+        "ai": "configured" if bool(os.getenv("GEMINI_API_KEY", "").strip()) else "not_configured",
+        "facebook": "disabled_until_phase_9",
+        "enabled_sources": summary["enabled_sources"],
+        "healthy_sources": summary["healthy_sources"],
+        "source_errors": summary["error_sources"],
+        "unchecked_sources": summary["unchecked_sources"]
+    }
+    analytics = {
+        "period_days": 7,
+        "collections": dict(analytics_row),
+        "editorial": dict(editorial_row),
+        "daily_stories": [dict(x) for x in daily_rows],
+        "top_sources": [dict(x) for x in top_source_rows],
+        "recent_runs": [
+            {**dict(x), "created_at": x["created_at"].isoformat() if x["created_at"] else None}
+            for x in recent_run_rows
+        ]
+    }
     return jsonify({
         "facebook": False,
         "monitoring": monitoring,
+        "system_health": system_health,
+        "analytics": analytics,
         "auto": False,
         "ai": {
             "provider": "Gemini",
