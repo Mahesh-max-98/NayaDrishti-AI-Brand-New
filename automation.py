@@ -457,7 +457,7 @@ def draft(title, summary, url=None):
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.2,
-            "max_tokens": 900,
+            "max_tokens": 1600,
             "stream": False
         }
         req = urllib.request.Request(
