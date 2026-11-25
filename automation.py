@@ -108,17 +108,44 @@ def database_status():
         with conn() as c:
             row = c.execute("""
                 SELECT current_database() AS database_name,
+                       to_regclass('public.schema_migrations') IS NOT NULL AS migrations_ready,
                        to_regclass('public.sources') IS NOT NULL AS sources_ready,
                        to_regclass('public.stories') IS NOT NULL AS stories_ready,
                        to_regclass('public.settings') IS NOT NULL AS settings_ready,
-                       to_regclass('public.activity_logs') IS NOT NULL AS logs_ready
+                       to_regclass('public.draft_revisions') IS NOT NULL AS revisions_ready,
+                       to_regclass('public.activity_logs') IS NOT NULL AS logs_ready,
+                       EXISTS(SELECT 1 FROM schema_migrations WHERE version=1) AS migration_applied,
+                       EXISTS(SELECT 1 FROM settings WHERE key='auto') AS default_settings_ready
             """).fetchone()
-        ready = all(row[k] for k in ("sources_ready", "stories_ready", "settings_ready", "logs_ready"))
-        return {"ok": ready, "database": row["database_name"] if ready else None}
+            ready = all(row[k] for k in (
+                "migrations_ready", "sources_ready", "stories_ready",
+                "settings_ready", "revisions_ready", "logs_ready",
+                "migration_applied", "default_settings_ready"
+            ))
+            if not ready:
+                return {"ok": False, "database": None}
+
+            # Verify the app's real table is writable and readable, then roll
+            # the test row back so readiness checks never leave test records.
+            marker = "readiness-" + secrets.token_hex(12)
+            c.execute("SAVEPOINT nd_readiness_test")
+            inserted = c.execute("""
+                INSERT INTO activity_logs(event_type,message,details)
+                VALUES('readiness_test',%s,%s)
+                RETURNING id
+            """, (marker, Jsonb({"temporary": True}))).fetchone()
+            verified = c.execute(
+                "SELECT message FROM activity_logs WHERE id=%s",
+                (inserted["id"],)
+            ).fetchone()
+            c.execute("ROLLBACK TO SAVEPOINT nd_readiness_test")
+            c.execute("RELEASE SAVEPOINT nd_readiness_test")
+            if not verified or verified["message"] != marker:
+                return {"ok": False, "database": None}
+        return {"ok": True, "database": row["database_name"]}
     except Exception:
         logger.exception("PostgreSQL readiness check failed.")
         return {"ok": False, "database": None}
-
 
 def getset(k, d="0"):
     with conn() as c:
