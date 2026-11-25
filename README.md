@@ -2,25 +2,31 @@
 
 A phased Nepali digital newsroom project. Development is intentionally divided into nine phases, with testing and verification after each phase.
 
-## Current phase: Phase 2 — PostgreSQL database
+## Current phase: Phase 3 — News source management and collection
 
-The application now uses the dedicated PostgreSQL database named `nayadrishti_ai_brand_new` for durable newsroom storage.
+The newsroom now includes an authenticated source manager backed by the dedicated PostgreSQL database.
 
-Phase 2 database tables:
-- `sources`: configured RSS sources and source health fields
-- `stories`: collected stories, duplicate/source-match metadata and draft text
-- `settings`: application settings
-- `draft_revisions`: future draft version history
-- `activity_logs`: newsroom activity records
-- `schema_migrations`: applied database schema versions
+Phase 3 features:
+- Add RSS and Atom feed sources.
+- Edit source names and feed URLs.
+- Enable or disable individual sources.
+- Remove a source without deleting stories already collected from it.
+- Manually collect up to 50 latest entries per enabled feed.
+- Track last check, last successful check, latest item count, consecutive failures and readable errors.
+- Display total, enabled and healthy source counts.
+- Normalize feed text and reject malformed items without article links.
+- Avoid exact URL duplicates and group highly similar recent headlines under a shared story record.
+- Keep original article URLs and source provenance in the database for editorial verification.
+- Protect feed fetching against local/private network targets, unsafe redirects, oversized feeds and long network waits.
+- Record source-management and collection activity in PostgreSQL.
 
-The application verifies the target database name before creating or writing tables. This prevents accidental writes to another project’s database. PostgreSQL connections use TLS.
+Collection is currently manual from the admin dashboard. Automatic monitoring is reserved for Phase 7. AI writing and editorial workflows are reserved for later phases. Facebook publishing remains disabled until Phase 9.
 
 ## Phase roadmap
 
-1. Foundation
-2. PostgreSQL database
-3. News source management and collection
+1. Foundation — complete
+2. PostgreSQL database — complete
+3. News source management and collection — implemented; production collection test pending
 4. News research, duplicate detection and categorization
 5. Nepali AI writing engine
 6. Editorial dashboard and draft management
@@ -34,7 +40,7 @@ Each phase must be tested before the next phase begins.
 
 Required:
 - `SECRET_KEY`: session-signing secret.
-- `ADMIN_PASSWORD`: admin login password.
+- `ADMIN_PASSWORD`: admin password.
 - `DATABASE_URL`: connection URL for the dedicated `nayadrishti_ai_brand_new` database. Since the web service and database are in different Render regions, use the database's external connection URL. The app enforces TLS and verifies the database name.
 
 AI:
@@ -42,6 +48,16 @@ AI:
 - `GEMINI_MODEL`: optional; defaults to `gemini-2.5-flash`.
 
 Never paste passwords, API keys, or database URLs into chat or commit them to GitHub. Do not create a second `DATABASE_URL` key; edit the existing key if it needs correction.
+
+## Admin dashboard
+
+- Open `/admin/login` and sign in using the admin password configured in Render.
+- Add a publisher name and its actual RSS or Atom feed URL.
+- Use **Collect news now** to check enabled sources.
+- Review each source's health, last check, item count and error message.
+- Source management and collection APIs require an authenticated admin session.
+
+A publisher homepage URL is not necessarily an RSS feed URL. Add only feed endpoints provided by the publisher or otherwise verified.
 
 ## Health checks
 
