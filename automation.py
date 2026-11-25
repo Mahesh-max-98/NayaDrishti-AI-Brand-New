@@ -568,7 +568,7 @@ def _backfill_research_fields():
                 (CASE WHEN source_count >= 3 AND published_at >= NOW() - INTERVAL '6 hours' THEN jsonb_build_array('breaking_candidate_requires_editorial_verification') ELSE '[]'::jsonb END),
             evidence_status = CASE WHEN source_count >= 2 THEN 'multiple_source_headline_match_only' ELSE 'single_source' END,
             is_breaking_candidate = (source_count >= 3 AND published_at >= NOW() - INTERVAL '6 hours'),
-            duplicate_group_key = md5(regexp_replace(lower(title), '[^[:alnum:]\\u0900-\\u097f]+', ' ', 'g'))
+            duplicate_group_key = md5(lower(title))
             WHERE category = 'Uncategorized' OR duplicate_group_key IS NULL
         """)
 
