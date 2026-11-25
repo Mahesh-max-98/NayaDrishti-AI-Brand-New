@@ -2,17 +2,19 @@
 
 A phased Nepali digital newsroom project. Development is intentionally divided into nine phases, with testing and verification after each phase.
 
-## Current phase: Phase 1 — Foundation
+## Current phase: Phase 2 — PostgreSQL database
 
-Current application components:
-- Flask web application
-- Responsive homepage
-- AI assistant page (AI configuration is handled in a later phase)
-- Admin login and protected admin routes
-- Liveness endpoint: `/health`
-- Configuration readiness endpoint: `/ready`
-- Basic browser security headers
-- Eight-hour permanent admin session lifetime
+The application now uses the dedicated PostgreSQL database named `nayadrishti_ai_brand_new` for durable newsroom storage.
+
+Phase 2 database tables:
+- `sources`: configured RSS sources and source health fields
+- `stories`: collected stories, duplicate/source-match metadata and draft text
+- `settings`: application settings
+- `draft_revisions`: future draft version history
+- `activity_logs`: newsroom activity records
+- `schema_migrations`: applied database schema versions
+
+The application verifies the target database name before creating or writing tables. This prevents accidental writes to another project’s database. PostgreSQL connections use TLS.
 
 ## Phase roadmap
 
@@ -28,33 +30,38 @@ Current application components:
 
 Each phase must be tested before the next phase begins.
 
-## Phase 1 Render configuration
+## Render environment variables
 
-Set these environment variables in the Render dashboard for the new service:
+Required:
+- `SECRET_KEY`: session-signing secret.
+- `ADMIN_PASSWORD`: admin login password.
+- `DATABASE_URL`: connection URL for the dedicated `nayadrishti_ai_brand_new` database. Since the web service and database are in different Render regions, use the database's external connection URL. The app enforces TLS and verifies the database name.
 
-- `SECRET_KEY`: a long, randomly generated session-signing secret.
-- `ADMIN_PASSWORD`: a strong, unique admin password.
+AI:
+- `GEMINI_API_KEY`: optional until AI drafting is tested.
+- `GEMINI_MODEL`: optional; defaults to `gemini-2.5-flash`.
 
-Never paste either value into chat or commit them to GitHub.
-
-The application can serve its homepage and liveness endpoint without these values, but admin login and readiness checks will remain unavailable until both are configured.
+Never paste passwords, API keys, or database URLs into chat or commit them to GitHub. Do not create a second `DATABASE_URL` key; edit the existing key if it needs correction.
 
 ## Health checks
 
-- `/health` confirms that the Flask application is responding.
-- `/ready` confirms that the required Phase 1 admin configuration is present. It returns HTTP 503 until `SECRET_KEY` and `ADMIN_PASSWORD` are configured.
+- `/health` confirms that the Flask application process is responding.
+- `/ready` confirms admin configuration and a working connection to the dedicated PostgreSQL database. It returns HTTP 503 if the database is missing, unreachable, or points to a different database.
 
 ## Facebook integration
 
-Facebook integration is reserved for Phase 9. Publishing and scheduled publishing are currently locked in the application. Do not add Facebook Page credentials or enable publishing during earlier phases.
+Facebook integration is reserved for Phase 9. Publishing and scheduled publishing remain locked. Do not add Facebook Page credentials or enable publishing during earlier phases.
 
 ## Hosting
 
 - GitHub repository: `Mahesh-max-98/NayaDrishti-AI-Brand-New`
 - Render service: `nayadrishti-ai-brand-new`
+- PostgreSQL database: `nayadrishti-ai-brand-new`
 - Production start command: `gunicorn --workers 1 --threads 8 app:app`
 
 ## Local development
+
+Set a PostgreSQL `DATABASE_URL` for a local development database, then run:
 
 ```bash
 pip install -r requirements.txt
