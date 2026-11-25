@@ -2,6 +2,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from datetime import timedelta
 
 from flask import Flask, jsonify, render_template_string, request
 
@@ -10,7 +11,17 @@ app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = True
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    return response
 
 HOME_PAGE = """<!doctype html>
 <html lang="en"><head>
@@ -91,7 +102,28 @@ def assistant():
 
 @app.get("/health")
 def health():
-    return jsonify({"service": "NayaDrishti AI", "status": "ok", "stage": 2})
+    # Liveness check: confirms that the Flask application process is responding.
+    return jsonify({"service": "NayaDrishti AI", "status": "ok", "phase": 1})
+
+
+@app.get("/ready")
+def readiness():
+    # Readiness check: required admin/session configuration must exist.
+    missing = [
+        name for name in ("SECRET_KEY", "ADMIN_PASSWORD")
+        if not os.environ.get(name)
+    ]
+    if missing:
+        return jsonify({
+            "service": "NayaDrishti AI",
+            "status": "configuration_required",
+            "missing": missing
+        }), 503
+    return jsonify({
+        "service": "NayaDrishti AI",
+        "status": "ready",
+        "phase": 1
+    })
 
 @app.post("/api/chat")
 def chat():
