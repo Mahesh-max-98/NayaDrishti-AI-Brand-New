@@ -221,6 +221,7 @@ def database_status():
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=2) AS source_migration_ready,
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=3) AS research_migration_ready,
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=4) AS provenance_migration_ready,
+                       EXISTS(SELECT 1 FROM schema_migrations WHERE version=5) AS research_backfill_ready,
                        (SELECT COUNT(*) FROM information_schema.columns
                         WHERE table_schema='public' AND table_name='sources'
                         AND column_name IN ('last_item_count','consecutive_failures'))=2 AS source_health_fields_ready,
@@ -230,7 +231,7 @@ def database_status():
             ready = all(row[k] for k in (
                 "migrations_ready", "sources_ready", "stories_ready",
                 "settings_ready", "revisions_ready", "logs_ready",
-                "migration_applied", "source_migration_ready", "research_migration_ready", "provenance_migration_ready",
+                "migration_applied", "source_migration_ready", "research_migration_ready", "provenance_migration_ready", "research_backfill_ready",
                 "source_health_fields_ready", "default_settings_ready"
             ))
             if not ready:
@@ -625,8 +626,7 @@ def _backfill_research_fields():
                                    WHEN COALESCE(summary,'')='' THEN 'headline_only_single_source'
                                    ELSE 'single_source_with_summary' END,
             is_breaking_candidate = (source_count >= 3 AND published_at >= NOW() - INTERVAL '6 hours'),
-            duplicate_group_key = md5(regexp_replace(lower(title), '[[:space:][:punct:]]+', ' ', 'g'))
-            WHERE category = 'Uncategorized' OR duplicate_group_key IS NULL
+            duplicate_group_key = md5(trim(regexp_replace(lower(title), '[[:space:][:punct:]]+', ' ', 'g')))
         """)
         c.execute("INSERT INTO schema_migrations(version) VALUES(5) ON CONFLICT(version) DO NOTHING")
 
