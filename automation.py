@@ -1233,6 +1233,7 @@ def generate_story_draft(sid):
     try:
         generated = draft(story["title"], story["summary"], story["url"])
     except (RuntimeError, ValueError) as exc:
+        current_app.logger.warning("Nepali draft generation failed for story %s: %s", sid, str(exc)[:300])
         return jsonify({"error": str(exc)}), 503
     with conn() as c:
         c.execute("UPDATE stories SET draft=%s,updated_at=NOW() WHERE id=%s", (generated, sid))
