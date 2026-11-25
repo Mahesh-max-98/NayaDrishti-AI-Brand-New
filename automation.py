@@ -997,7 +997,8 @@ def _collect_one(feed):
                 WHERE id=%s
             """, (len(entries), feed["id"]))
         logger.info("News source checked: %s (%s entries)", feed["name"], len(entries))
-    except Exception as exc:        result["status"] = "error"
+    except Exception as exc:
+        result["status"] = "error"
         result["error"] = str(exc)[:300]
         with conn() as c:
             c.execute("""
