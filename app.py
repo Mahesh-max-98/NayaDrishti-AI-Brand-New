@@ -105,14 +105,14 @@ def assistant():
 @app.get("/health")
 def health():
     # Liveness check: confirms that the Flask application process is responding.
-    return jsonify({"service": "NayaDrishti AI", "status": "ok", "phase": 1})
+    return jsonify({"service": "NayaDrishti AI", "status": "ok", "phase": 2})
 
 
 @app.get("/ready")
 def readiness():
-    # Readiness check: required admin/session configuration must exist.
+    # Readiness requires admin configuration and the dedicated PostgreSQL database.
     missing = [
-        name for name in ("SECRET_KEY", "ADMIN_PASSWORD")
+        name for name in ("SECRET_KEY", "ADMIN_PASSWORD", "DATABASE_URL")
         if not os.environ.get(name)
     ]
     if missing:
@@ -121,10 +121,19 @@ def readiness():
             "status": "configuration_required",
             "missing": missing
         }), 503
+    from automation import database_status
+    database = database_status()
+    if not database["ok"]:
+        return jsonify({
+            "service": "NayaDrishti AI",
+            "status": "database_not_ready",
+            "phase": 2
+        }), 503
     return jsonify({
         "service": "NayaDrishti AI",
         "status": "ready",
-        "phase": 1
+        "phase": 2,
+        "database": "connected"
     })
 
 @app.post("/api/chat")
