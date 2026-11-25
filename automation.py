@@ -497,7 +497,8 @@ def draft(title, summary, url=None):
         if not generated:
             finish_reason = str(choice.get("finish_reason", "unknown"))
             last_issue = f"{selected_model} returned no visible answer (finish reason: {finish_reason})."
-            logger.warning("OpenRouter model %s returned no visible draft text; trying fallback.", selected_model)            continue
+            logger.warning("OpenRouter model %s returned no visible draft text; trying fallback.", selected_model)
+            continue
         try:
             return _clean_news_draft(generated, title)
         except RuntimeError as exc:
@@ -1750,7 +1751,8 @@ def dismiss_story(sid):
 @auth
 def bulk_dismiss_stories():
     data=request.get_json(silent=True) or {}
-    ids=data.get("ids")    if not isinstance(ids,list) or not ids or len(ids)>100 or any(not isinstance(x,int) or x<1 for x in ids):
+    ids=data.get("ids")
+    if not isinstance(ids,list) or not ids or len(ids)>100 or any(not isinstance(x,int) or x<1 for x in ids):
         return jsonify({"error":"Select between 1 and 100 valid story IDs."}),400
     with conn() as c:
         changed=c.execute("UPDATE stories SET status='dismissed',updated_at=NOW() WHERE id=ANY(%s) RETURNING id",(ids,)).fetchall()
