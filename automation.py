@@ -85,6 +85,8 @@ def seed_default_sources():
             ("NEB Official Notices", "https://neb.gov.np/", ["https://neb.gov.np/news-notices"]),
             ("Thaha Khabar", "https://thahakhabar.com/rss/", ["https://thahakhabar.com/"]),
             ("Ujyaalo Online", "https://ujyaaloonline.com/rss", ["https://www.ujyaaloonline.com/"]),
+            ("Ministry of Education, Science and Technology", "https://www.moest.gov.np/", ["https://nepal.gov.np/"]),
+            ("Curriculum Development Centre", "https://www.moecdc.gov.np/", ["https://techmandu.com/feed"]),
         ):
             for duplicate_url in duplicate_urls:
                 c.execute("DELETE FROM sources WHERE url=%s AND EXISTS (SELECT 1 FROM sources WHERE url=%s)", (duplicate_url, keep_url))
