@@ -1,6 +1,9 @@
 name: Render uptime check
 
 on:
+  push:
+    paths:
+      - ".github/workflows/render-uptime.yml"
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
