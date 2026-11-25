@@ -207,30 +207,80 @@ def draft(title, summary, url):
         return ""
 
 
+def _validate_feed_url(url):
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("Use a public HTTP or HTTPS RSS feed URL without embedded credentials.")
+    host = parsed.hostname.rstrip(".").lower()
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        raise ValueError("Local or private network feed addresses are not allowed.")
+    try:
+        addresses = [ipaddress.ip_address(host)]
+    except ValueError:
+        try:
+            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None)]
+        except Exception as exc:
+            raise ValueError("The feed hostname could not be resolved.") from exc
+    if not addresses or any(not addr.is_global for addr in addresses):
+        raise ValueError("The feed must resolve only to public internet addresses.")
+    return url
+
+
+class _SafeFeedRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_feed_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _fetch_feed(url):
+    _validate_feed_url(url)
+    opener = urllib.request.build_opener(_SafeFeedRedirect())
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "NayaDrishtiNewsCollector/1.0", "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*"}
+    )
+    with opener.open(req, timeout=18) as response:
+        status = getattr(response, "status", 200)
+        if status < 200 or status >= 300:
+            raise RuntimeError("Feed server returned HTTP " + str(status))
+        payload = response.read(4 * 1024 * 1024 + 1)
+        if len(payload) > 4 * 1024 * 1024:
+            raise RuntimeError("Feed is larger than the 4 MB safety limit.")
+        parsed = feedparser.parse(payload, response_headers=dict(response.headers.items()))
+    if parsed.bozo and not parsed.entries:
+        raise RuntimeError("The server response is not a readable RSS or Atom feed.")
+    return parsed
+
+
+def _plain_text(value):
+    value = re.sub(r"<[^>]*>", " ", str(value or ""))
+    return re.sub(r"\\s+", " ", html.unescape(value)).strip()
+
+
 def add(title, summary, url, source):
     if not title or not url.startswith(("http://", "https://")):
-        return False
+        return "duplicate"
     with conn() as c:
         if c.execute("SELECT id FROM stories WHERE url=%s", (url,)).fetchone():
-            return False
+            return "duplicate"
         rows = c.execute(
-            "SELECT id,title,sources,source_count FROM stories WHERE status <> 'published' ORDER BY id DESC LIMIT 120"
+            "SELECT id,title,sources,source_count FROM stories WHERE status <> 'published' ORDER BY id DESC LIMIT 300"
         ).fetchall()
+        norm = lambda value: re.sub(r"[^\\w]+", " ", value.lower()).strip()
         match = None
-        norm = lambda s: re.sub(r"\\W+", " ", s.lower()).strip()
         for row in rows:
-            if SequenceMatcher(None, norm(title), norm(row["title"])).ratio() >= 0.86:
+            if SequenceMatcher(None, norm(title), norm(row["title"])).ratio() >= 0.88:
                 match = row
                 break
         if match:
-            names = match["sources"] or []
+            names = list(match["sources"] or [])
             if source not in names:
                 names.append(source)
             c.execute(
                 "UPDATE stories SET sources=%s,source_count=%s,updated_at=NOW() WHERE id=%s",
                 (Jsonb(names), len(names), match["id"])
             )
-            return True
+            return "matched"
         row = c.execute("""
             INSERT INTO stories(title,summary,url,source_name,sources,source_count,draft,status)
             VALUES(%s,%s,%s,%s,%s,1,'','draft')
@@ -241,34 +291,71 @@ def add(title, summary, url, source):
             "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
             ("story_collected", "A story was collected from a configured source.", Jsonb({"story_id": sid, "source": source}))
         )
-    text = draft(title, summary, url)
+    generated = draft(title, summary, url)
     with conn() as c:
-        c.execute("UPDATE stories SET draft=%s,updated_at=NOW() WHERE id=%s", (text, sid))
-    return True
+        c.execute("UPDATE stories SET draft=%s,updated_at=NOW() WHERE id=%s", (generated, sid))
+    return "new"
 
 
 def collect():
-    added = 0
     with conn() as c:
-        feeds = c.execute("SELECT name,url FROM sources WHERE enabled=TRUE ORDER BY name").fetchall()
-    for f in feeds:
+        feeds = c.execute(
+            "SELECT id,name,url FROM sources WHERE enabled=TRUE ORDER BY name"
+        ).fetchall()
+
+    totals = {"checked": 0, "new": 0, "matched": 0, "duplicates": 0, "failed": 0, "sources": []}
+    for feed in feeds:
+        result = {
+            "source_id": feed["id"], "source": feed["name"],
+            "status": "ok", "items_seen": 0, "new": 0,
+            "matched": 0, "duplicates": 0, "error": None
+        }
         try:
-            parsed = feedparser.parse(f["url"])
-            for e in parsed.entries[:20]:
-                if add(
-                    getattr(e, "title", "").strip(),
-                    getattr(e, "summary", ""),
-                    getattr(e, "link", "").strip(),
-                    f["name"]
-                ):
-                    added += 1
+            parsed = _fetch_feed(feed["url"])
+            entries = parsed.entries[:50]
+            result["items_seen"] = len(entries)
+            for entry in entries:
+                title = _plain_text(getattr(entry, "title", ""))
+                link = str(getattr(entry, "link", "") or "").strip()
+                summary = _plain_text(getattr(entry, "summary", "") or getattr(entry, "description", ""))
+                if not title or not link.startswith(("https://", "http://")):
+                    result["duplicates"] += 1
+                    continue
+                outcome = add(title, summary, link, feed["name"])
+                result[outcome] += 1
             with conn() as c:
-                c.execute("UPDATE sources SET last_checked=NOW(),last_success=NOW(),last_error=NULL WHERE url=%s", (f["url"],))
+                c.execute("""
+                    UPDATE sources
+                    SET last_checked=NOW(), last_success=NOW(), last_error=NULL,
+                        last_item_count=%s, consecutive_failures=0
+                    WHERE id=%s
+                """, (len(entries), feed["id"]))
         except Exception as exc:
-            logger.exception("RSS collection failed for a configured source.")
+            result["status"] = "error"
+            result["error"] = str(exc)[:300]
             with conn() as c:
-                c.execute("UPDATE sources SET last_checked=NOW(),last_error=%s WHERE url=%s", (str(exc)[:500], f["url"]))
-    return added
+                c.execute("""
+                    UPDATE sources
+                    SET last_checked=NOW(), last_error=%s, consecutive_failures=consecutive_failures+1
+                    WHERE id=%s
+                """, (result["error"], feed["id"]))
+            logger.exception("RSS collection failed for source id %s.", feed["id"])
+
+        totals["checked"] += 1
+        for key in ("new", "matched", "duplicates"):
+            totals[key] += result[key]
+        if result["status"] == "error":
+            totals["failed"] += 1
+        totals["sources"].append(result)
+
+    with conn() as c:
+        c.execute(
+            "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+            ("collection_finished", "RSS collection run finished.", Jsonb({
+                key: value for key, value in totals.items() if key != "sources"
+            }))
+        )
+    return totals
 
 
 def publish(sid, manual=False):
