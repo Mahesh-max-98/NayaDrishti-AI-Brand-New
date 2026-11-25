@@ -508,7 +508,8 @@ def draft(title, summary, url=None):
 def _validate_feed_url(url):
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError("Use a public HTTP or HTTPS RSS feed URL without embedded credentials.")    host = parsed.hostname.rstrip(".").lower()
+        raise ValueError("Use a public HTTP or HTTPS RSS feed URL without embedded credentials.")
+    host = parsed.hostname.rstrip(".").lower()
     if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
         raise ValueError("Local or private network feed addresses are not allowed.")
     try:
