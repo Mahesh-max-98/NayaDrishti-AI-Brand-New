@@ -370,36 +370,73 @@ def _clean_news_draft(value):
         raise RuntimeError("The AI response was not in Nepali. Please regenerate the draft.")
     return "\n".join(text.splitlines()[:10]).strip()[:1200].rstrip()
 
+def _openrouter_message_text(message):
+    """Extract only user-visible text; never treat private reasoning as a news draft."""
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content", "")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and part.get("type") in ("text", "output_text"):
+                value = part.get("text", "")
+                if isinstance(value, str):
+                    parts.append(value)
+        return "\\n".join(part for part in parts if part.strip()).strip()
+    if isinstance(content, dict):
+        value = content.get("text", "")
+        return value.strip() if isinstance(value, str) else ""
+    return ""
+
+
 def draft(title, summary, url=None):
-    """Generate a Nepali Facebook draft through OpenRouter; never publish it."""
+    """Generate a source-grounded Nepali draft with safe model fallback; never publish."""
     key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not key:
         raise RuntimeError("OpenRouter is not configured. Add OPENROUTER_API_KEY in the Render environment.")
     model = os.getenv("OPENROUTER_MODEL", "openrouter/free").strip()
     if not re.fullmatch(r"[A-Za-z0-9._/-]{1,160}", model):
         raise RuntimeError("OPENROUTER_MODEL contains an invalid model name.")
+
+    # The dynamic free router can select a reasoning model that returns no visible
+    # answer. If that happens, try stable text-chat free endpoints one by one.
+    models = [model]
+    if model == "openrouter/free":
+        models.extend([
+            "google/gemma-4-26b-a4b-it:free",
+            "baidu/ernie-5.5-flash-preview:free",
+            "nvidia/nemotron-3.5-lightning:free"
+        ])
+    models = list(dict.fromkeys(models))
     prompt = _build_draft_prompt(title, summary)
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "You are a careful Nepali newsroom editor. Write only in natural Nepali, use only facts in the supplied source, do not invent details, and produce a concise Facebook news post."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.2,
-        "max_tokens": 650
-    }
-    req = urllib.request.Request(
-        "https://openrouter.ai/api/v1/chat/completions",
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + key,
-            "HTTP-Referer": "https://nayadrishti-ai-brand-new.onrender.com",
-            "X-OpenRouter-Title": "NayaDrishti AI"
-        },
-        method="POST"
-    )
-    try:
+    last_issue = "OpenRouter did not return visible text."
+
+    for selected_model in models:
+        body = {
+            "model": selected_model,
+            "messages": [
+                {"role": "system", "content": "You are a careful Nepali newsroom editor. Write only in natural Nepali, use only facts in the supplied source, do not invent details, and produce a concise Facebook news post. Return the finished post as the visible assistant answer."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 900,
+            "stream": False
+        }
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + key,
+                "HTTP-Referer": "https://nayadrishti-ai-brand-new.onrender.com",
+                "X-OpenRouter-Title": "NayaDrishti AI"
+            },
+            method="POST"
+        )
         result = None
         for attempt, delay in enumerate((0, 2, 4), start=1):
             if delay:
@@ -410,10 +447,11 @@ def draft(title, summary, url=None):
                 break
             except urllib.error.HTTPError as exc:
                 if exc.code in (500, 502, 503, 504) and attempt < 3:
+                    last_issue = "A model provider returned a temporary server error."
                     continue
                 try:
                     payload = json.loads(exc.read(8192).decode("utf-8", errors="replace"))
-                    error_data = payload.get("error", {}) if isinstance(payload, dict) else {}
+                    error_data = payload.get("error", {})
                     detail = str(error_data.get("message", ""))[:240] if isinstance(error_data, dict) else str(error_data)[:240]
                 except Exception:
                     detail = ""
@@ -421,23 +459,41 @@ def draft(title, summary, url=None):
                     detail = detail.replace(key, "[redacted]")
                 suffix = " Provider says: " + re.sub(r"\\s+", " ", detail) if detail else ""
                 if exc.code == 402:
-                    raise RuntimeError("OpenRouter account needs credits or the selected model is not available on the current balance." + suffix) from None
+                    raise RuntimeError("OpenRouter account needs credits or this model is unavailable on the current account." + suffix) from None
                 if exc.code == 429:
-                    raise RuntimeError("OpenRouter rate or usage limit reached. Check your account limits." + suffix) from None
+                    raise RuntimeError("OpenRouter rate or usage limit reached. Please try again later." + suffix) from None
                 if exc.code in (400, 401, 403, 404):
-                    raise RuntimeError(f"OpenRouter rejected the request (HTTP {exc.code}). Check the API key, model and account access." + suffix) from None
-                raise RuntimeError(f"OpenRouter is temporarily unavailable after retries (HTTP {exc.code})." + suffix) from None
+                    raise RuntimeError(f"OpenRouter rejected the request (HTTP {exc.code}). Check the configured model and account access." + suffix) from None
+                last_issue = f"OpenRouter provider error HTTP {exc.code}." + suffix
+                break
+            except (urllib.error.URLError, TimeoutError):
+                last_issue = "Could not reach this OpenRouter model provider."
+                if attempt < 3:
+                    continue
+                break
+            except (ValueError, TypeError):
+                last_issue = "OpenRouter returned an unreadable response."
+                break
+
         if result is None:
-            raise RuntimeError("OpenRouter did not return a response. Please try again.")
-    except (urllib.error.URLError, TimeoutError):
-        raise RuntimeError("Could not reach OpenRouter. Please try again later.") from None
-    except (ValueError, TypeError):
-        raise RuntimeError("OpenRouter returned an unreadable response.") from None
-    choices = result.get("choices", [])
-    generated = choices[0].get("message", {}).get("content", "") if choices else ""
-    if not isinstance(generated, str) or not generated.strip():
-        raise RuntimeError("OpenRouter did not return a text draft. Please try again.")
-    return _clean_news_draft(generated)
+            continue
+        choices = result.get("choices", []) if isinstance(result, dict) else []
+        choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+        message = choice.get("message", {})
+        generated = _openrouter_message_text(message)
+        if not generated:
+            finish_reason = str(choice.get("finish_reason", "unknown"))
+            last_issue = f"{selected_model} returned no visible answer (finish reason: {finish_reason})."
+            logger.warning("OpenRouter model %s returned no visible draft text; trying fallback.", selected_model)
+            continue
+        try:
+            return _clean_news_draft(generated)
+        except RuntimeError as exc:
+            last_issue = str(exc)
+            logger.warning("OpenRouter model %s returned an unusable draft: %s", selected_model, last_issue[:180])
+
+    raise RuntimeError("Nepali draft generation failed after trying the configured model and safe fallbacks. " + last_issue + " Please try again later.")
+
 def _validate_feed_url(url):
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
