@@ -6,6 +6,10 @@ import urllib.request
 from flask import Flask, jsonify, render_template_string, request
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = True
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 
 HOME_PAGE = """<!doctype html>
@@ -170,10 +174,9 @@ def chat():
     except (ValueError, KeyError, IndexError, TypeError):
         return jsonify({"error": "The AI response could not be processed. Please try again."}), 502
 
+from automation import bp as automation_bp
+app.register_blueprint(automation_bp)
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
-
-
-from automation import automation_bp
-app.register_blueprint(automation_bp)
