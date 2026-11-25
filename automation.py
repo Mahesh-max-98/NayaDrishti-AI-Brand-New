@@ -350,9 +350,14 @@ def _build_draft_prompt(title, summary):
     )
 
 
+def _remove_comment_on_heading(value):
+    """Remove unwanted Comment on headings from news posts and drafts."""
+    return re.sub(r"(?im)^\s*#{1,6}\s*comment\s+on\b[^\n]*(?:\n|$)", "", str(value or "")).strip()
+
+
 def _clean_news_draft(value, title=None):
     """Normalize model output and reject empty, non-Nepali or headline-only results."""
-    text = str(value or "").strip()
+    text = _remove_comment_on_heading(value)
     text = re.sub(r"^```(?:text|markdown)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
     text = re.sub(r"https?://\S+", "", text)
     lines = []
