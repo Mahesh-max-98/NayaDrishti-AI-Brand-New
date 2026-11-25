@@ -1039,7 +1039,7 @@ $('stories').innerHTML=visible.map(s=>'<div class=story data-story="'+s.id+'"><l
 }
 
 async function load(){try{const d=await api('/api/admin/status');$('total').textContent=d.summary.total_sources;$('enabled').textContent=d.summary.enabled_sources;$('healthy').textContent=d.summary.healthy_sources;$('storiesCount').textContent=d.summary.stories;
-$('aiStatus').textContent=d.ai.configured?'Gemini configured · '+d.ai.model+' · writing engine available:'Gemini API key is not configured in Render';
+$('aiStatus').textContent=d.ai.configured?'Gemini configured · '+d.ai.model+' · writing engine available':'Gemini API key is not configured in Render';
 $('multiMatches').textContent=d.summary.research.multi_source_matches;
 $('oldStories').textContent=d.summary.research.possibly_old;
 $('breakingCandidates').textContent=d.summary.research.breaking_candidates;
