@@ -44,7 +44,7 @@ h1{margin:24px 0 18px;font-size:clamp(42px,7vw,76px);line-height:1.04;letter-spa
 .note{text-align:center;color:#8294ad;font-size:12px;margin:25px auto 0}footer{border-top:1px solid #9aabc226;padding:22px 0;color:#8294ad;font-size:12px}footer .wrap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 @media(max-width:700px){main{padding-top:54px}.features{grid-template-columns:1fr}h1{letter-spacing:-2px}.intro{font-size:15px}header{height:68px}}
 </style></head><body><div class="wrap">
-<header><a class="brand" href="/" style="color:inherit;text-decoration:none"><span class="mark">N</span><span>NayaDrishti AI<small>NEWS • INSIGHT • PERSPECTIVE</small></span></a><span class="status">● Newsroom online · Phase 4</span></header>
+<header><a class="brand" href="/" style="color:inherit;text-decoration:none"><span class="mark">N</span><span>NayaDrishti AI<small>NEWS • INSIGHT • PERSPECTIVE</small></span></a><span class="status">● Newsroom online · Phase 5</span></header>
 <main><section class="hero"><div class="eyebrow"><span class="dot"></span> A fresh perspective on Nepali news</div>
 <h1>Clear news.<br><span>Clear perspective.</span></h1>
 <p class="intro">A smarter space to collect, understand and review news from Nepal. Built to make useful information easier to follow — with clarity, context and responsibility.</p>
@@ -52,8 +52,8 @@ h1{margin:24px 0 18px;font-size:clamp(42px,7vw,76px);line-height:1.04;letter-spa
 <section id="features"><div class="section-label">The platform we're building</div><div class="features">
 <a class="feature" href="/admin/login"><div class="ico">◈</div><h2>News research engine</h2><p>Collect, categorise, group similar headlines and review source evidence.</p></a>
 <a class="feature" href="/admin/login"><div class="ico">✧</div><h2>Collected news</h2><p>Review collected stories and open original articles for verification.</p></a>
-<div class="feature"><div class="ico">✓</div><h2>Editorial review</h2><p>AI writing and editorial approval are the next development stages.</p></div>
-</div><p class="note">Phase 4 includes news research, categorisation, duplicate grouping and evidence signals. AI writing and editorial approval are next.</p></section></main>
+<div class="feature"><div class="ico">✓</div><h2>Editorial review</h2><p>AI-assisted Nepali news drafting is now available for editorial review.</p></div>
+</div><p class="note">Phase 5 adds Nepali AI news drafting. Every generated draft remains unpublished until reviewed by an editor.</p></section></main>
 <footer><div class="wrap"><span>© 2026 NayaDrishti AI</span><span>Built for clarity. Designed for Nepal.</span></div></footer>
 </div></body></html>"""
 
@@ -105,7 +105,7 @@ def assistant():
 @app.get("/health")
 def health():
     # Liveness check: confirms that the Flask application process is responding.
-    return jsonify({"service": "NayaDrishti AI", "status": "ok", "phase": 4})
+    return jsonify({"service": "NayaDrishti AI", "status": "ok", "phase": 5})
 
 
 @app.get("/ready")
@@ -127,14 +127,19 @@ def readiness():
         return jsonify({
             "service": "NayaDrishti AI",
             "status": "database_not_ready",
-            "phase": 4
+            "phase": 5
         }), 503
     return jsonify({
         "service": "NayaDrishti AI",
         "status": "ready",
-        "phase": 4,
+        "phase": 5,
         "database": "connected",
-        "sources": database["sources"]
+        "sources": database["sources"],
+        "ai": {
+            "provider": "Gemini",
+            "configured": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
+            "model": os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+        }
     })
 
 @app.post("/api/chat")
