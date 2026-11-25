@@ -123,12 +123,18 @@ def database_status():
                        to_regclass('public.draft_revisions') IS NOT NULL AS revisions_ready,
                        to_regclass('public.activity_logs') IS NOT NULL AS logs_ready,
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=1) AS migration_applied,
-                       EXISTS(SELECT 1 FROM settings WHERE key='auto') AS default_settings_ready
+                       EXISTS(SELECT 1 FROM schema_migrations WHERE version=2) AS source_migration_ready,
+                       (SELECT COUNT(*) FROM information_schema.columns
+                        WHERE table_schema='public' AND table_name='sources'
+                        AND column_name IN ('last_item_count','consecutive_failures'))=2 AS source_health_fields_ready,
+                       EXISTS(SELECT 1 FROM settings WHERE key='auto') AS default_settings_ready,
+                       (SELECT COUNT(*)::int FROM sources) AS source_count
             """).fetchone()
             ready = all(row[k] for k in (
                 "migrations_ready", "sources_ready", "stories_ready",
                 "settings_ready", "revisions_ready", "logs_ready",
-                "migration_applied", "default_settings_ready"
+                "migration_applied", "source_migration_ready",
+                "source_health_fields_ready", "default_settings_ready"
             ))
             if not ready:
                 return {"ok": False, "database": None}
@@ -150,7 +156,7 @@ def database_status():
             c.execute("RELEASE SAVEPOINT nd_readiness_test")
             if not verified or verified["message"] != marker:
                 return {"ok": False, "database": None}
-        return {"ok": True, "database": row["database_name"]}
+        return {"ok": True, "database": row["database_name"], "sources": row["source_count"]}
     except Exception:
         logger.exception("PostgreSQL readiness check failed.")
         return {"ok": False, "database": None}
