@@ -1174,7 +1174,7 @@ def publish(sid, manual=False):
     try:
         result = _facebook_graph_request(
             "POST", f"{config['page_id']}/feed",
-            {"message": str(row["draft"]).strip()}
+            {"message": _remove_comment_on_heading(row["draft"])}
         )
         post_id = str(result.get("id", "")).strip()
         if not post_id:
@@ -1718,7 +1718,7 @@ def collect_now():
 @auth
 def update_story_draft(sid):
     data = request.get_json(silent=True) or {}
-    content = str(data.get("draft", "")).strip()
+    content = _remove_comment_on_heading(data.get("draft", ""))
     if not content or len(content) > 12000:
         return jsonify({"error": "Draft must contain 1–12,000 characters."}), 400
     with conn() as c:
@@ -1773,7 +1773,7 @@ def story_revisions(sid):
         exists=c.execute("SELECT 1 FROM stories WHERE id=%s",(sid,)).fetchone()
         if not exists: return jsonify({"error":"Story not found."}),404
         rows=c.execute("SELECT version,content,created_at FROM draft_revisions WHERE story_id=%s ORDER BY version DESC",(sid,)).fetchall()
-    return jsonify({"revisions":[{"version":x["version"],"content":x["content"],"created_at":x["created_at"].isoformat()} for x in rows]})
+    return jsonify({"revisions":[{"version":x["version"],"content":_remove_comment_on_heading(x["content"]),"created_at":x["created_at"].isoformat()} for x in rows]})
 
 @bp.post("/api/admin/stories/<int:sid>/restore")
 @auth
@@ -1789,7 +1789,7 @@ def restore_story_revision(sid):
         if row["draft"] and row["draft"]!=revision["content"]:
             next_version=c.execute("SELECT COALESCE(MAX(version),0)+1 AS v FROM draft_revisions WHERE story_id=%s",(sid,)).fetchone()["v"]
             c.execute("INSERT INTO draft_revisions(story_id,version,content) VALUES(%s,%s,%s)",(sid,next_version,row["draft"]))
-        c.execute("UPDATE stories SET draft=%s,status='draft',updated_at=NOW() WHERE id=%s",(revision["content"],sid))
+        c.execute("UPDATE stories SET draft=%s,status='draft',updated_at=NOW() WHERE id=%s",(_remove_comment_on_heading(revision["content"]),sid))
         c.execute("INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",("draft_revision_restored","An earlier draft version was restored.",Jsonb({"story_id":sid,"version":version})))
     return jsonify({"ok":True})
 
@@ -1804,7 +1804,7 @@ def export_pending_drafts():
     with conn() as c:
         rows=c.execute("SELECT id,title,category,source_name,status,draft,url FROM stories WHERE draft<>'' AND status='draft' ORDER BY updated_at DESC").fetchall()
     for row in rows:
-        writer.writerow([row["id"],row["title"],row["category"],row["source_name"],row["status"],row["draft"],row["url"]])
+        writer.writerow([row["id"],row["title"],row["category"],row["source_name"],row["status"],_remove_comment_on_heading(row["draft"]),row["url"]])
     from flask import Response
     return Response("\ufeff"+output.getvalue(),mimetype="text/csv; charset=utf-8",headers={"Content-Disposition":"attachment; filename=nayadrishti-pending-drafts.csv"})
 
