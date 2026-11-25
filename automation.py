@@ -336,6 +336,9 @@ def collect():
             "matched": 0, "duplicates": 0, "error": None
         }
         try:
+            with conn() as c:
+                c.execute("UPDATE sources SET last_checked=NOW() WHERE id=%s", (feed["id"],))
+            logger.info("Checking RSS source: %s", feed["name"])
             parsed = _fetch_feed(feed["url"])
             entries = parsed.entries[:50]
             result["items_seen"] = len(entries)
@@ -355,6 +358,7 @@ def collect():
                         last_item_count=%s, consecutive_failures=0
                     WHERE id=%s
                 """, (len(entries), feed["id"]))
+            logger.info("RSS source checked: %s (%s entries)", feed["name"], len(entries))
         except Exception as exc:
             result["status"] = "error"
             result["error"] = str(exc)[:300]
@@ -394,8 +398,13 @@ def cycle():
     local = now.astimezone(__import__("zoneinfo").ZoneInfo("Asia/Kathmandu"))
     if local.hour < 5 or (local.hour > 22 or (local.hour == 22 and local.minute > 55)):
         return
+    logger.info("Automatic collection cycle started (Nepal time %s).", local.strftime("%H:%M"))
     try:
-        collect()
+        result = collect()
+        logger.info(
+            "Automatic collection finished: %s sources, %s new stories, %s failures.",
+            result["checked"], result["new"], result["failed"]
+        )
     except Exception:
         logger.exception("Scheduled news collection failed.")
 
@@ -416,8 +425,12 @@ scheduler.add_job(
     replace_existing=True, max_instances=1, coalesce=True,
     next_run_time=datetime.now(timezone.utc)
 )
-if os.getenv("ADMIN_PASSWORD") and DATABASE_URL:
-    scheduler.start()
+if DATABASE_URL:
+    try:
+        scheduler.start()
+        logger.info("Automatic Nepali news collection scheduler started.")
+    except Exception:
+        logger.exception("Automatic news collection scheduler could not start.")
 
 
 LOGIN = """<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>Admin login</title><style>body{background:#0b1220;color:white;font:16px system-ui;display:grid;place-items:center;min-height:90vh}.box{background:#152238;padding:28px;border-radius:16px}input,button{padding:12px;margin:6px;border-radius:8px}</style><div class=box><h2>NayaDrishti Admin</h2><p>{{error}}</p><form method=post><input name=password type=password placeholder='Admin password' required><button>Sign in</button></form></div>"""
