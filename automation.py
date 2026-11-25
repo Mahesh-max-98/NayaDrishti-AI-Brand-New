@@ -89,8 +89,8 @@ def seed_default_sources():
             for duplicate_url in duplicate_urls:
                 c.execute("DELETE FROM sources WHERE url=%s AND EXISTS (SELECT 1 FROM sources WHERE url=%s)", (duplicate_url, keep_url))
                 c.execute(
-                    "UPDATE sources SET name=%s,url=%s,last_checked=NULL,last_success=NULL,last_error=NULL,last_item_count=0,consecutive_failures=0 WHERE name=%s AND url=%s AND NOT EXISTS (SELECT 1 FROM sources WHERE url=%s)",
-                    (name, keep_url, name, duplicate_url, keep_url)
+                    "UPDATE sources SET name=%s,url=%s,last_checked=NULL,last_success=NULL,last_error=NULL,last_item_count=0,consecutive_failures=0 WHERE url=%s AND NOT EXISTS (SELECT 1 FROM sources WHERE url=%s)",
+                    (name, keep_url, duplicate_url, keep_url)
                 )
         for name, url in DEFAULT_SOURCES:
             c.execute(
