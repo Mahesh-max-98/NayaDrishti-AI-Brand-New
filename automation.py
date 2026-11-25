@@ -1745,7 +1745,8 @@ def dismiss_story(sid):
     with conn() as c:
         row=c.execute("SELECT id FROM stories WHERE id=%s FOR UPDATE",(sid,)).fetchone()
         if not row: return jsonify({"error":"Story not found."}),404
-        c.execute("UPDATE stories SET status='dismissed',updated_at=NOW() WHERE id=%s",(sid,))        c.execute("INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",("story_dismissed","An editor dismissed a collected story.",Jsonb({"story_id":sid})))
+        c.execute("UPDATE stories SET status='dismissed',updated_at=NOW() WHERE id=%s",(sid,))
+        c.execute("INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",("story_dismissed","An editor dismissed a collected story.",Jsonb({"story_id":sid})))
     return jsonify({"ok":True})
 
 @bp.post("/api/admin/stories/bulk-dismiss")
