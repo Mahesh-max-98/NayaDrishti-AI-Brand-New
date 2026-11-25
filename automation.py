@@ -359,13 +359,22 @@ class _HomepageLinks(HTMLParser):
 def _fetch_feed(url):
     parsed_url = urllib.parse.urlsplit(url)
     base = urllib.parse.urlunsplit((parsed_url.scheme, parsed_url.netloc, "/", "", ""))
+    path = (parsed_url.path or "/").lower()
+    # A configured RSS/Atom endpoint should be tried directly, not followed
+    # by six unrelated paths on the same host.
+    is_feed_path = (
+        path.endswith(("/feed", "/feed/", "/rss", "/rss/"))
+        or path.endswith((".xml", ".atom"))
+    )
     candidates = [url]
-    for path in ("/feed", "/feed/", "/rss", "/rss.xml", "/feed.xml", "/atom.xml"):
-        candidate = urllib.parse.urljoin(base, path.lstrip("/"))
-        if candidate not in candidates:
-            candidates.append(candidate)
+    if not is_feed_path:
+        for fallback_path in ("/feed", "/rss", "/rss.xml"):
+            candidate = urllib.parse.urljoin(base, fallback_path.lstrip("/"))
+            if candidate not in candidates:
+                candidates.append(candidate)
 
     last_error = None
+    reachable_html = False
     for candidate in candidates:
         try:
             _validate_feed_url(candidate)
@@ -379,7 +388,9 @@ def _fetch_feed(url):
                     "Cache-Control": "no-cache"
                 }
             )
-            with opener.open(req, timeout=18) as response:
+            # Keep each source check bounded so a slow publisher cannot hold
+            # the whole 25-source collection cycle for several minutes.
+            with opener.open(req, timeout=8) as response:
                 status = getattr(response, "status", 200)
                 if status < 200 or status >= 300:
                     raise RuntimeError("Source server returned HTTP " + str(status))
@@ -392,47 +403,55 @@ def _fetch_feed(url):
             if parsed.entries:
                 return parsed
 
-            # Discover publisher-advertised RSS/Atom feeds from the HTML head.
             text_payload = payload.decode("utf-8", errors="replace")
-            discovery = _FeedDiscoveryParser(final_url)
-            discovery.feed(text_payload)
-            for feed_url in discovery.feeds:
-                if feed_url == candidate:
-                    continue
-                try:
-                    _validate_feed_url(feed_url)
-                    feed_req = urllib.request.Request(feed_url, headers={
-                        "User-Agent": "Mozilla/5.0 (compatible; NayaDrishtiNewsCollector/1.0)",
-                        "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*"
-                    })
-                    with opener.open(feed_req, timeout=18) as feed_response:
-                        feed_payload = feed_response.read(4 * 1024 * 1024 + 1)
-                        if len(feed_payload) > 4 * 1024 * 1024:
-                            continue
-                        discovered = feedparser.parse(feed_payload, response_headers=dict(feed_response.headers.items()))
-                    if discovered.entries:
-                        return discovered
-                except Exception as exc:
-                    last_error = exc
+            content_type = headers.get("Content-Type", "").lower()
+            if "text/html" in content_type or b"<html" in payload[:1000].lower():
+                reachable_html = True
+                discovery = _FeedDiscoveryParser(final_url)
+                discovery.feed(text_payload)
+                for feed_url in discovery.feeds:
+                    if feed_url == candidate:
+                        continue
+                    try:
+                        _validate_feed_url(feed_url)
+                        feed_req = urllib.request.Request(feed_url, headers={
+                            "User-Agent": "Mozilla/5.0 (compatible; NayaDrishtiNewsCollector/1.0)",
+                            "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*"
+                        })
+                        with opener.open(feed_req, timeout=8) as feed_response:
+                            feed_payload = feed_response.read(4 * 1024 * 1024 + 1)
+                            if len(feed_payload) > 4 * 1024 * 1024:
+                                continue
+                            discovered = feedparser.parse(
+                                feed_payload,
+                                response_headers=dict(feed_response.headers.items())
+                            )
+                        if discovered.entries:
+                            return discovered
+                    except Exception as exc:
+                        last_error = exc
 
-            # Fall back to same-site article links on the publisher homepage.
-            if "text/html" in headers.get("Content-Type", "").lower() or b"<html" in payload[:1000].lower():
                 parser = _HomepageLinks(final_url)
                 parser.feed(text_payload)
                 if parser.entries:
                     class _Result:
                         entries = parser.entries
                     return _Result()
-            # Keep trying alternate common feed paths if this candidate had no items.
-            last_error = RuntimeError("No RSS entries, advertised feed, or readable article links were found.")
+            last_error = RuntimeError("The source is reachable but no readable headlines were found.")
         except Exception as exc:
             last_error = exc
             continue
 
+    # HTTP 200 HTML means the publisher is reachable even if its page exposes
+    # no article links our generic parser can read. The dashboard must show
+    # this as connected-without-items, not pretend news was collected.
+    if reachable_html:
+        class _EmptyResult:
+            entries = []
+        return _EmptyResult()
     if last_error:
         raise last_error
     raise RuntimeError("No usable feed endpoint was found for this publisher.")
-
 
 def _plain_text(value):
     value = re.sub(r"<[^>]*>", " ", str(value or ""))
