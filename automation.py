@@ -8,6 +8,7 @@ import re
 import logging
 import socket
 import ipaddress
+from concurrent.futures import ThreadPoolExecutor
 import html
 from html.parser import HTMLParser
 from datetime import datetime, timezone
@@ -53,8 +54,8 @@ DEFAULT_SOURCES = [
     ("Ratopati", "https://www.ratopati.com/feed"),
     ("Annapurna Post", "https://annapurnapost.com/"),
     ("Setopati", "https://www.setopati.com/feed"),
-    ("Nagarik News", "https://nagariknews.nagariknetwork.com/"),
-    ("Gorkhapatra", "https://gorkhapatraonline.com/"),
+    ("Nagarik News", "https://nagariknews.nagariknetwork.com/feed"),
+    ("Gorkhapatra", "https://gorkhapatraonline.com/rss"),
     ("Ujyaalo Online", "https://www.ujyaaloonline.com/"),
     ("Thaha Khabar", "https://thahakhabar.com/"),
     ("Nepal Samaya", "https://nepalsamaya.com/"),
@@ -318,8 +319,12 @@ def _fetch_feed(url):
     opener = urllib.request.build_opener(_SafeFeedRedirect())
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; NayaDrishtiNewsCollector/1.0)",
-                 "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html, */*"}
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html, */*",
+            "Accept-Language": "ne-NP,ne;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Cache-Control": "no-cache"
+        }
     )
     with opener.open(req, timeout=18) as response:
         status = getattr(response, "status", 200)
@@ -386,65 +391,72 @@ def add(title, summary, url, source):
     return "new"
 
 
+def _collect_one(feed):
+    result = {
+        "source_id": feed["id"], "source": feed["name"],
+        "status": "ok", "items_seen": 0, "new": 0,
+        "matched": 0, "duplicates": 0, "error": None
+    }
+    try:
+        with conn() as c:
+            c.execute("UPDATE sources SET last_checked=NOW() WHERE id=%s", (feed["id"],))
+        logger.info("Checking news source: %s", feed["name"])
+        parsed = _fetch_feed(feed["url"])
+        entries = parsed.entries[:50]
+        result["items_seen"] = len(entries)
+        for entry in entries:
+            title = _plain_text(entry.get("title", "") if isinstance(entry, dict) else getattr(entry, "title", ""))
+            link = str(entry.get("link", "") if isinstance(entry, dict) else (getattr(entry, "link", "") or "")).strip()
+            summary = _plain_text(entry.get("summary", "") if isinstance(entry, dict) else (getattr(entry, "summary", "") or getattr(entry, "description", "")))
+            if not title or not link.startswith(("https://", "http://")):
+                result["duplicates"] += 1
+                continue
+            outcome = add(title, summary, link, feed["name"])
+            result["duplicates" if outcome == "duplicate" else outcome] += 1
+        with conn() as c:
+            c.execute("""
+                UPDATE sources
+                SET last_checked=NOW(), last_success=NOW(), last_error=NULL,
+                    last_item_count=%s, consecutive_failures=0
+                WHERE id=%s
+            """, (len(entries), feed["id"]))
+        logger.info("News source checked: %s (%s entries)", feed["name"], len(entries))
+    except Exception as exc:
+        result["status"] = "error"
+        result["error"] = str(exc)[:300]
+        with conn() as c:
+            c.execute("""
+                UPDATE sources
+                SET last_checked=NOW(), last_error=%s, consecutive_failures=consecutive_failures+1
+                WHERE id=%s
+            """, (result["error"], feed["id"]))
+        logger.warning("News source failed: %s: %s", feed["name"], result["error"])
+    return result
+
+
 def collect():
     with conn() as c:
         feeds = c.execute(
             "SELECT id,name,url FROM sources WHERE enabled=TRUE ORDER BY name"
         ).fetchall()
 
-    totals = {"checked": 0, "new": 0, "matched": 0, "duplicates": 0, "failed": 0, "sources": []}
-    for feed in feeds:
-        result = {
-            "source_id": feed["id"], "source": feed["name"],
-            "status": "ok", "items_seen": 0, "new": 0,
-            "matched": 0, "duplicates": 0, "error": None
-        }
-        try:
-            with conn() as c:
-                c.execute("UPDATE sources SET last_checked=NOW() WHERE id=%s", (feed["id"],))
-            logger.info("Checking RSS source: %s", feed["name"])
-            parsed = _fetch_feed(feed["url"])
-            entries = parsed.entries[:50]
-            result["items_seen"] = len(entries)
-            for entry in entries:
-                title = _plain_text(entry.get("title", "") if isinstance(entry, dict) else getattr(entry, "title", ""))
-                link = str(entry.get("link", "") if isinstance(entry, dict) else (getattr(entry, "link", "") or "")).strip()
-                summary = _plain_text(entry.get("summary", "") if isinstance(entry, dict) else (getattr(entry, "summary", "") or getattr(entry, "description", "")))
-                if not title or not link.startswith(("https://", "http://")):
-                    result["duplicates"] += 1
-                    continue
-                outcome = add(title, summary, link, feed["name"])
-                result["duplicates" if outcome == "duplicate" else outcome] += 1
-            with conn() as c:
-                c.execute("""
-                    UPDATE sources
-                    SET last_checked=NOW(), last_success=NOW(), last_error=NULL,
-                        last_item_count=%s, consecutive_failures=0
-                    WHERE id=%s
-                """, (len(entries), feed["id"]))
-            logger.info("RSS source checked: %s (%s entries)", feed["name"], len(entries))
-        except Exception as exc:
-            result["status"] = "error"
-            result["error"] = str(exc)[:300]
-            with conn() as c:
-                c.execute("""
-                    UPDATE sources
-                    SET last_checked=NOW(), last_error=%s, consecutive_failures=consecutive_failures+1
-                    WHERE id=%s
-                """, (result["error"], feed["id"]))
-            logger.exception("RSS collection failed for source id %s.", feed["id"])
+    # Fetch publishers concurrently so slow or blocked websites do not
+    # prevent the remaining sources from being checked in the same cycle.
+    with ThreadPoolExecutor(max_workers=6, thread_name_prefix="nd-source") as pool:
+        results = list(pool.map(_collect_one, feeds))
 
-        totals["checked"] += 1
-        for key in ("new", "matched", "duplicates"):
-            totals[key] += result[key]
-        if result["status"] == "error":
-            totals["failed"] += 1
-        totals["sources"].append(result)
-
+    totals = {
+        "checked": len(results),
+        "new": sum(x["new"] for x in results),
+        "matched": sum(x["matched"] for x in results),
+        "duplicates": sum(x["duplicates"] for x in results),
+        "failed": sum(1 for x in results if x["status"] == "error"),
+        "sources": results
+    }
     with conn() as c:
         c.execute(
             "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
-            ("collection_finished", "RSS collection run finished.", Jsonb({
+            ("collection_finished", "News source collection run finished.", Jsonb({
                 key: value for key, value in totals.items() if key != "sources"
             }))
         )
