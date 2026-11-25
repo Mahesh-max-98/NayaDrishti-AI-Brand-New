@@ -4,7 +4,7 @@ import urllib.error
 import urllib.request
 from datetime import timedelta
 
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, redirect, render_template_string, request
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
@@ -98,7 +98,8 @@ def home():
 
 @app.get("/assistant")
 def assistant():
-    return render_template_string(ASSISTANT_PAGE)
+    # The assistant entry point belongs behind the admin login and dashboard.
+    return redirect("/admin")
 
 @app.get("/health")
 def health():
