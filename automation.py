@@ -684,7 +684,7 @@ def _add_with_conn(c, title, summary, url, source, published_at=None):
     rows = c.execute(
         """SELECT id,title,summary,sources,source_count,category,published_at,created
            FROM stories
-           ORDER BY id DESC LIMIT 500"""
+           ORDER BY id DESC LIMIT 200"""
     ).fetchall()
     match = None
     for row in rows:
@@ -753,7 +753,7 @@ def _collect_one(feed):
             c.execute("UPDATE sources SET last_checked=NOW() WHERE id=%s", (feed["id"],))
         logger.info("Checking news source: %s", feed["name"])
         parsed = _fetch_feed(feed["url"])
-        entries = parsed.entries[:50]
+        entries = parsed.entries[:25]
         result["items_seen"] = len(entries)
         with conn() as c:
             for entry in entries:
