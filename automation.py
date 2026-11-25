@@ -612,7 +612,7 @@ def _backfill_research_fields():
                                    WHEN COALESCE(summary,'')='' THEN 'headline_only_single_source'
                                    ELSE 'single_source_with_summary' END,
             is_breaking_candidate = (source_count >= 3 AND published_at >= NOW() - INTERVAL '6 hours'),
-            duplicate_group_key = md5(lower(title))
+            duplicate_group_key = md5(regexp_replace(lower(title), '[[:space:][:punct:]]+', ' ', 'g'))
             WHERE category = 'Uncategorized' OR duplicate_group_key IS NULL
         """)
 
@@ -644,7 +644,7 @@ def add(title, summary, url, source, published_at=None):
 
         rows = c.execute(
             """SELECT id,title,summary,sources,source_count,category,published_at,created
-               FROM stories WHERE status <> 'published'
+               FROM stories
                ORDER BY id DESC LIMIT 500"""
         ).fetchall()
         match = None
@@ -652,6 +652,11 @@ def add(title, summary, url, source, published_at=None):
             score = _title_similarity(title, row["title"])
             same_category = row["category"] == category or row["category"] in ("Other", "Uncategorized") or category == "Other"
             if score >= 0.84 and same_category:
+                # Similar headlines published far apart should remain separate stories.
+                if published_at and row["published_at"]:
+                    age_gap = abs((published_at - row["published_at"]).total_seconds())
+                    if age_gap > 48 * 3600:
+                        continue
                 match = row
                 break
 
@@ -674,7 +679,7 @@ def add(title, summary, url, source, published_at=None):
 
         names = [source]
         flags, evidence, breaking = _research_metadata(names, published_at, summary=summary)
-        group_key = hashlib.sha256(_normalized_title(title).encode("utf-8")).hexdigest()[:20]
+        group_key = hashlib.md5(_normalized_title(title).encode("utf-8")).hexdigest()
         row = c.execute(
             """INSERT INTO stories(
                 title,summary,url,source_name,sources,source_count,category,draft,status,
