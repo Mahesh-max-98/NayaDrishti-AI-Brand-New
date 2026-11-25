@@ -5,6 +5,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 import re
+import hashlib
 import logging
 import socket
 import ipaddress
@@ -168,9 +169,17 @@ def init():
         """)
         c.execute("ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_item_count INTEGER NOT NULL DEFAULT 0")
         c.execute("ALTER TABLE sources ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0")
+        c.execute("ALTER TABLE stories ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ")
+        c.execute("ALTER TABLE stories ADD COLUMN IF NOT EXISTS research_flags JSONB NOT NULL DEFAULT '[]'::jsonb")
+        c.execute("ALTER TABLE stories ADD COLUMN IF NOT EXISTS evidence_status TEXT NOT NULL DEFAULT 'single_source'")
+        c.execute("ALTER TABLE stories ADD COLUMN IF NOT EXISTS is_breaking_candidate BOOLEAN NOT NULL DEFAULT FALSE")
+        c.execute("ALTER TABLE stories ADD COLUMN IF NOT EXISTS duplicate_group_key TEXT")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_stories_category_created ON stories(category, created DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_stories_published_at ON stories(published_at DESC)")
         c.execute("INSERT INTO settings(key, value) VALUES('auto', '0') ON CONFLICT(key) DO NOTHING")
         c.execute("INSERT INTO schema_migrations(version) VALUES(1) ON CONFLICT(version) DO NOTHING")
         c.execute("INSERT INTO schema_migrations(version) VALUES(2) ON CONFLICT(version) DO NOTHING")
+        c.execute("INSERT INTO schema_migrations(version) VALUES(3) ON CONFLICT(version) DO NOTHING")
 
 
 def database_status():
@@ -186,6 +195,7 @@ def database_status():
                        to_regclass('public.activity_logs') IS NOT NULL AS logs_ready,
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=1) AS migration_applied,
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=2) AS source_migration_ready,
+                       EXISTS(SELECT 1 FROM schema_migrations WHERE version=3) AS research_migration_ready,
                        (SELECT COUNT(*) FROM information_schema.columns
                         WHERE table_schema='public' AND table_name='sources'
                         AND column_name IN ('last_item_count','consecutive_failures'))=2 AS source_health_fields_ready,
@@ -195,7 +205,7 @@ def database_status():
             ready = all(row[k] for k in (
                 "migrations_ready", "sources_ready", "stories_ready",
                 "settings_ready", "revisions_ready", "logs_ready",
-                "migration_applied", "source_migration_ready",
+                "migration_applied", "source_migration_ready", "research_migration_ready",
                 "source_health_fields_ready", "default_settings_ready"
             ))
             if not ready:
@@ -458,41 +468,167 @@ def _plain_text(value):
     return re.sub(r"\s+", " ", html.unescape(value)).strip()
 
 
-def add(title, summary, url, source):
+def _research_category(title, summary=""):
+    text_value = (str(title or "") + " " + str(summary or "")).lower()
+    rules = [
+        ("Politics", ["राजनीति", "सरकार", "मन्त्रिपरिषद", "मन्त्री", "संसद", "निर्वाचन", "प्रधानमन्त्री", "politic", "government", "parliament", "election"]),
+        ("National", ["नेपाल", "नेपाली", "राष्ट्रिय", "देशभर", "काठमाडौं", "nepal", "national"]),
+        ("International", ["अन्तर्राष्ट्रिय", "विदेश", "भारत", "चीन", "अमेरिका", "विश्व", "international", "world", "global"]),
+        ("Economy", ["अर्थतन्त्र", "आर्थिक", "बजेट", "बैंक", "शेयर", "व्यापार", "महँगी", "economy", "business", "market", "bank", "finance"]),
+        ("Sports", ["खेलकुद", "क्रिकेट", "फुटबल", "खेल", "विश्वकप", "league", "cricket", "football", "sports", "match"]),
+        ("Education", ["शिक्षा", "विद्यालय", "कलेज", "विश्वविद्यालय", "परीक्षा", "एसईई", "शिक्षक", "education", "school", "college", "exam", "university"]),
+        ("Technology", ["प्रविधि", "कम्प्युटर", "मोबाइल", "इन्टरनेट", "एआई", "सफ्टवेयर", "technology", "tech", "software", "internet", "ai"]),
+        ("Health", ["स्वास्थ्य", "अस्पताल", "चिकित्सा", "रोग", "औषधि", "health", "hospital", "medical", "disease"]),
+        ("Entertainment", ["मनोरञ्जन", "चलचित्र", "फिल्म", "सिनेमा", "कलाकार", "संगीत", "entertainment", "movie", "film", "music"]),
+        ("Disaster & Weather", ["मौसम", "वर्षा", "बाढी", "पहिरो", "भूकम्प", "आगलागी", "weather", "flood", "landslide", "earthquake", "storm"]),
+        ("Crime & Security", ["प्रहरी", "अपराध", "गिरफ्तार", "दुर्घटना", "सुरक्षा", "police", "crime", "arrest", "accident", "security"]),
+    ]
+    for category, keywords in rules:
+        if any(word in text_value for word in keywords):
+            return category
+    return "Other"
+
+
+def _normalized_title(value):
+    value = str(value or "").lower()
+    value = re.sub(r"[^\\w\\u0900-\\u097f]+", " ", value, flags=re.UNICODE)
+    return re.sub(r"\\s+", " ", value).strip()
+
+
+def _title_similarity(left, right):
+    a, b = _normalized_title(left), _normalized_title(right)
+    if not a or not b:
+        return 0.0
+    sequence_score = SequenceMatcher(None, a, b).ratio()
+    a_tokens, b_tokens = set(a.split()), set(b.split())
+    overlap = len(a_tokens & b_tokens) / max(1, len(a_tokens | b_tokens))
+    return max(sequence_score, overlap)
+
+
+def _published_datetime(entry):
+    value = entry.get("published_parsed") or entry.get("updated_parsed")
+    if value:
+        try:
+            return datetime(*value[:6], tzinfo=timezone.utc)
+        except Exception:
+            pass
+    raw = entry.get("published") or entry.get("updated") or ""
+    if raw:
+        try:
+            parsed = feedparser._parse_date(raw)
+            if parsed:
+                return datetime(*parsed[:6], tzinfo=timezone.utc)
+        except Exception:
+            pass
+    return None
+
+
+def _research_metadata(source_names, published_at, created_at=None):
+    now = datetime.now(timezone.utc)
+    reference = published_at or created_at
+    flags = []
+    if published_at is None:
+        flags.append("publication_time_unknown")
+    elif (now - published_at).total_seconds() > 48 * 3600:
+        flags.append("possibly_old_news")
+    unique_sources = len(set(source_names or []))
+    if unique_sources >= 2:
+        flags.append("similar_headline_seen_in_multiple_sources")
+    if unique_sources >= 3 and reference and (now - reference).total_seconds() <= 6 * 3600:
+        flags.append("breaking_candidate_requires_editorial_verification")
+    evidence = "multiple_source_headline_match_only" if unique_sources >= 2 else "single_source"
+    breaking = unique_sources >= 3 and reference is not None and (now - reference).total_seconds() <= 6 * 3600
+    return flags, evidence, breaking
+
+
+def _backfill_research_fields():
+    with conn() as c:
+        rows = c.execute(
+            "SELECT id,title,summary,category,sources,published_at,created FROM stories"
+        ).fetchall()
+        for row in rows:
+            category = row["category"] if row["category"] and row["category"] != "Uncategorized" else _research_category(row["title"], row["summary"])
+            names = list(row["sources"] or [])
+            flags, evidence, breaking = _research_metadata(names, row["published_at"], row["created"])
+            group_key = hashlib.sha256(_normalized_title(row["title"]).encode("utf-8")).hexdigest()[:20]
+            c.execute(
+                "UPDATE stories SET category=%s,research_flags=%s,evidence_status=%s,is_breaking_candidate=%s,duplicate_group_key=%s WHERE id=%s",
+                (category, Jsonb(flags), evidence, breaking, group_key, row["id"])
+            )
+
+
+def add(title, summary, url, source, published_at=None):
     if not title or not url.startswith(("http://", "https://")):
         return "duplicate"
+    category = _research_category(title, summary)
     with conn() as c:
-        if c.execute("SELECT id FROM stories WHERE url=%s", (url,)).fetchone():
+        existing = c.execute(
+            "SELECT id,sources,source_count,published_at,created FROM stories WHERE url=%s",
+            (url,)
+        ).fetchone()
+        if existing:
+            names = list(existing["sources"] or [])
+            if source not in names:
+                names.append(source)
+                flags, evidence, breaking = _research_metadata(names, published_at or existing["published_at"], existing["created"])
+                c.execute(
+                    """UPDATE stories SET sources=%s,source_count=%s,
+                       published_at=COALESCE(published_at,%s),research_flags=%s,
+                       evidence_status=%s,is_breaking_candidate=%s,updated_at=NOW()
+                       WHERE id=%s""",
+                    (Jsonb(names), len(names), published_at, Jsonb(flags), evidence, breaking, existing["id"])
+                )
+                return "matched"
             return "duplicate"
+
         rows = c.execute(
-            "SELECT id,title,sources,source_count FROM stories WHERE status <> 'published' ORDER BY id DESC LIMIT 300"
+            """SELECT id,title,summary,sources,source_count,category,published_at,created
+               FROM stories WHERE status <> 'published'
+               ORDER BY id DESC LIMIT 500"""
         ).fetchall()
-        norm = lambda value: re.sub(r"[^\w]+", " ", value.lower()).strip()
         match = None
         for row in rows:
-            if SequenceMatcher(None, norm(title), norm(row["title"])).ratio() >= 0.88:
+            score = _title_similarity(title, row["title"])
+            same_category = row["category"] == category or row["category"] in ("Other", "Uncategorized") or category == "Other"
+            if score >= 0.84 and same_category:
                 match = row
                 break
+
         if match:
             names = list(match["sources"] or [])
             if source not in names:
                 names.append(source)
+            flags, evidence, breaking = _research_metadata(names, match["published_at"] or published_at, match["created"])
             c.execute(
-                "UPDATE stories SET sources=%s,source_count=%s,updated_at=NOW() WHERE id=%s",
-                (Jsonb(names), len(names), match["id"])
+                """UPDATE stories SET sources=%s,source_count=%s,
+                   summary=CASE WHEN summary='' AND %s<>'' THEN %s ELSE summary END,
+                   published_at=COALESCE(published_at,%s),research_flags=%s,
+                   evidence_status=%s,is_breaking_candidate=%s,updated_at=NOW()
+                   WHERE id=%s""",
+                (Jsonb(names), len(names), (summary or "")[:4000], (summary or "")[:4000],
+                 published_at, Jsonb(flags), evidence, breaking, match["id"])
             )
             return "matched"
-        row = c.execute("""
-            INSERT INTO stories(title,summary,url,source_name,sources,source_count,draft,status)
-            VALUES(%s,%s,%s,%s,%s,1,'','draft')
-            RETURNING id
-        """, (title[:400], (summary or "")[:4000], url, source, Jsonb([source]))).fetchone()
+
+        names = [source]
+        flags, evidence, breaking = _research_metadata(names, published_at)
+        group_key = hashlib.sha256(_normalized_title(title).encode("utf-8")).hexdigest()[:20]
+        row = c.execute(
+            """INSERT INTO stories(
+                title,summary,url,source_name,sources,source_count,category,draft,status,
+                published_at,research_flags,evidence_status,is_breaking_candidate,duplicate_group_key
+            ) VALUES(%s,%s,%s,%s,%s,1,%s,'','draft',%s,%s,%s,%s,%s)
+            RETURNING id""",
+            (title[:400], (summary or "")[:4000], url, source, Jsonb(names), category,
+             published_at, Jsonb(flags), evidence, breaking, group_key)
+        ).fetchone()
         sid = row["id"]
         c.execute(
             "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
-            ("story_collected", "A story was collected from a configured source.", Jsonb({"story_id": sid, "source": source}))
+            ("story_collected", "A story was collected and classified for editorial research.", Jsonb({
+                "story_id": sid, "source": source, "category": category, "evidence_status": evidence
+            }))
         )
-    # Phase 3 only collects and stores source material. Nepali AI writing is Phase 5.
     return "new"
 
 
@@ -513,10 +649,11 @@ def _collect_one(feed):
             title = _plain_text(entry.get("title", "") if isinstance(entry, dict) else getattr(entry, "title", ""))
             link = str(entry.get("link", "") if isinstance(entry, dict) else (getattr(entry, "link", "") or "")).strip()
             summary = _plain_text(entry.get("summary", "") if isinstance(entry, dict) else (getattr(entry, "summary", "") or getattr(entry, "description", "")))
+            published_at = _published_datetime(entry) if isinstance(entry, dict) else None
             if not title or not link.startswith(("https://", "http://")):
                 result["duplicates"] += 1
                 continue
-            outcome = add(title, summary, link, feed["name"])
+            outcome = add(title, summary, link, feed["name"], published_at)
             result["duplicates" if outcome == "duplicate" else outcome] += 1
         with conn() as c:
             c.execute("""
@@ -596,6 +733,7 @@ if DATABASE_URL:
     try:
         init()
         seed_default_sources()
+        _backfill_research_fields()
     except Exception:
         logger.exception("PostgreSQL schema initialization or default source setup failed.")
 
@@ -680,13 +818,17 @@ def status():
             FROM sources ORDER BY name
         """).fetchall()
         rows = c.execute(
-            "SELECT id,title,summary,url,source_name,source_count,draft,status,post_id FROM stories ORDER BY id DESC LIMIT 50"
+            """SELECT id,title,summary,url,source_name,source_count,draft,status,post_id,
+                      category,published_at,research_flags,evidence_status,is_breaking_candidate
+               FROM stories ORDER BY id DESC LIMIT 100"""
         ).fetchall()
         summary = c.execute("""
             SELECT
               COUNT(*)::int AS total_sources,
               COUNT(*) FILTER (WHERE enabled)::int AS enabled_sources,
-              COUNT(*) FILTER (WHERE enabled AND last_success IS NOT NULL AND last_error IS NULL)::int AS healthy_sources
+              COUNT(*) FILTER (WHERE enabled AND last_success IS NOT NULL AND last_error IS NULL AND last_item_count > 0)::int AS healthy_sources,
+              COUNT(*) FILTER (WHERE enabled AND last_error IS NOT NULL)::int AS error_sources,
+              COUNT(*) FILTER (WHERE enabled AND last_checked IS NULL)::int AS unchecked_sources
             FROM sources
         """).fetchone()
         story_count = c.execute("SELECT COUNT(*)::int AS count FROM stories").fetchone()["count"]
