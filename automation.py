@@ -9,6 +9,7 @@ import hashlib
 import logging
 import socket
 import ipaddress
+from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor
 import html
 from html.parser import HTMLParser
@@ -611,10 +612,15 @@ def _published_datetime(entry):
     raw = entry.get("published") or entry.get("updated") or ""
     if raw:
         try:
-            parsed = feedparser._parse_date(raw)
+            parsed = parsedate_to_datetime(str(raw))
             if parsed:
-                return datetime(*parsed[:6], tzinfo=timezone.utc)
-        except Exception:
+                return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            pass
+        try:
+            parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
             pass
     return None
 
