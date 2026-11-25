@@ -386,7 +386,7 @@ def _openrouter_message_text(message):
                 value = part.get("text", "")
                 if isinstance(value, str):
                     parts.append(value)
-        return "\\n".join(part for part in parts if part.strip()).strip()
+        return "\n".join(part for part in parts if part.strip()).strip()
     if isinstance(content, dict):
         value = content.get("text", "")
         return value.strip() if isinstance(value, str) else ""
@@ -457,7 +457,7 @@ def draft(title, summary, url=None):
                     detail = ""
                 if key and detail:
                     detail = detail.replace(key, "[redacted]")
-                suffix = " Provider says: " + re.sub(r"\\s+", " ", detail) if detail else ""
+                suffix = " Provider says: " + re.sub(r"\s+", " ", detail) if detail else ""
                 if exc.code == 402:
                     raise RuntimeError("OpenRouter account needs credits or this model is unavailable on the current account." + suffix) from None
                 if exc.code == 429:
