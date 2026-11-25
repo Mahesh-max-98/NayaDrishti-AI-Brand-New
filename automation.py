@@ -254,7 +254,7 @@ def _fetch_feed(url):
 
 def _plain_text(value):
     value = re.sub(r"<[^>]*>", " ", str(value or ""))
-    return re.sub(r"\\s+", " ", html.unescape(value)).strip()
+    return re.sub(r"\s+", " ", html.unescape(value)).strip()
 
 
 def add(title, summary, url, source):
@@ -266,7 +266,7 @@ def add(title, summary, url, source):
         rows = c.execute(
             "SELECT id,title,sources,source_count FROM stories WHERE status <> 'published' ORDER BY id DESC LIMIT 300"
         ).fetchall()
-        norm = lambda value: re.sub(r"[^\\w]+", " ", value.lower()).strip()
+        norm = lambda value: re.sub(r"[^\w]+", " ", value.lower()).strip()
         match = None
         for row in rows:
             if SequenceMatcher(None, norm(title), norm(row["title"])).ratio() >= 0.88:
