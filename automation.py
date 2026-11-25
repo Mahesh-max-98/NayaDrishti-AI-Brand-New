@@ -912,9 +912,10 @@ def _repair_research_signals():
                     WHEN COALESCE(summary,'')='' THEN 'headline_only_single_source'
                     ELSE 'single_source_with_summary'
                 END,
-                is_breaking_candidate = (
+                is_breaking_candidate = COALESCE(
                     source_count >= 3
-                    AND published_at BETWEEN NOW() - INTERVAL '6 hours' AND NOW()
+                    AND published_at BETWEEN NOW() - INTERVAL '6 hours' AND NOW(),
+                    FALSE
                 )
         """)
         c.execute("INSERT INTO schema_migrations(version) VALUES(7) ON CONFLICT(version) DO NOTHING")
