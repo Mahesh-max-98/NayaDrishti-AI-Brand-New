@@ -368,11 +368,24 @@ def draft(title, summary, url=None):
         with urllib.request.urlopen(req, timeout=35) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
+        # Read Google's structured error message only; never log request headers or API keys.
+        try:
+            payload = json.loads(exc.read(8192).decode("utf-8", errors="replace"))
+            provider_error = payload.get("error", {}) if isinstance(payload, dict) else {}
+            reason = str(provider_error.get("message", "")).strip()
+            status = str(provider_error.get("status", "")).strip()
+        except Exception:
+            reason, status = "", ""
+        reason = re.sub(r"\\s+", " ", reason)[:240]
+        if key:
+            reason = reason.replace(key, "[redacted]")
+        detail = f" Gemini says: {reason}" if reason else ""
         if exc.code == 429:
-            raise RuntimeError("Gemini usage limit reached. Check the API quota and try again later.") from None
+            raise RuntimeError("Gemini usage limit reached. Check the API quota and try again later." + detail) from None
         if exc.code in (400, 401, 403, 404):
-            raise RuntimeError("Gemini rejected the request. Check the API key, model name and API access in Render.") from None
-        raise RuntimeError(f"Gemini is temporarily unavailable (HTTP {exc.code}).") from None
+            label = f" ({status})" if status else ""
+            raise RuntimeError(f"Gemini rejected the request (HTTP {exc.code}{label}). Check the API key, model name and API access." + detail) from None
+        raise RuntimeError(f"Gemini is temporarily unavailable (HTTP {exc.code})." + detail) from None
     except (urllib.error.URLError, TimeoutError):
         raise RuntimeError("Could not reach Gemini. Please try again later.") from None
     except (ValueError, TypeError):
@@ -1233,7 +1246,7 @@ def generate_story_draft(sid):
     try:
         generated = draft(story["title"], story["summary"], story["url"])
     except (RuntimeError, ValueError) as exc:
-        current_app.logger.warning("Nepali draft generation failed for story %s: %s", sid, str(exc)[:300])
+        logger.warning("Nepali draft generation failed for story %s: %s", sid, str(exc)[:300])
         return jsonify({"error": str(exc)}), 503
     with conn() as c:
         c.execute("UPDATE stories SET draft=%s,updated_at=NOW() WHERE id=%s", (generated, sid))
