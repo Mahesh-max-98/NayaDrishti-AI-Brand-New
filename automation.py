@@ -568,7 +568,6 @@ def _research_category(title, summary=""):
     text_value = (str(title or "") + " " + str(summary or "")).lower()
     rules = [
         ("Politics", ["राजनीति", "सरकार", "मन्त्रिपरिषद", "मन्त्री", "संसद", "निर्वाचन", "प्रधानमन्त्री", "politic", "government", "parliament", "election"]),
-        ("National", ["नेपाल", "नेपाली", "राष्ट्रिय", "देशभर", "काठमाडौं", "nepal", "national"]),
         ("International", ["अन्तर्राष्ट्रिय", "विदेश", "भारत", "चीन", "अमेरिका", "विश्व", "international", "world", "global"]),
         ("Economy", ["अर्थतन्त्र", "आर्थिक", "बजेट", "बैंक", "शेयर", "व्यापार", "महँगी", "economy", "business", "market", "bank", "finance"]),
         ("Sports", ["खेलकुद", "क्रिकेट", "फुटबल", "खेल", "विश्वकप", "league", "cricket", "football", "sports", "match"]),
@@ -578,6 +577,7 @@ def _research_category(title, summary=""):
         ("Entertainment", ["मनोरञ्जन", "चलचित्र", "फिल्म", "सिनेमा", "कलाकार", "संगीत", "entertainment", "movie", "film", "music"]),
         ("Disaster & Weather", ["मौसम", "वर्षा", "बाढी", "पहिरो", "भूकम्प", "आगलागी", "weather", "flood", "landslide", "earthquake", "storm"]),
         ("Crime & Security", ["प्रहरी", "अपराध", "गिरफ्तार", "दुर्घटना", "सुरक्षा", "police", "crime", "arrest", "accident", "security"]),
+        ("National", ["नेपाल", "नेपाली", "राष्ट्रिय", "देशभर", "काठमाडौं", "nepal", "national"]),
     ]
     for category, keywords in rules:
         if any(word in text_value for word in keywords):
