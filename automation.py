@@ -656,89 +656,91 @@ def _backfill_research_fields():
         """)
         c.execute("INSERT INTO schema_migrations(version) VALUES(5) ON CONFLICT(version) DO NOTHING")
 
-def add(title, summary, url, source, published_at=None):
+def _add_with_conn(c, title, summary, url, source, published_at=None):
     if not title or not url.startswith(("http://", "https://")):
         return "duplicate"
     category = _research_category(title, summary)
-    with conn() as c:
-        existing = c.execute(
-            "SELECT id,sources,source_count,published_at,created FROM stories WHERE url=%s",
-            (url,)
-        ).fetchone()
-        if existing:
-            names = list(existing["sources"] or [])
-            if source not in names:
-                names.append(source)
-                flags, evidence, breaking = _research_metadata(names, published_at or existing["published_at"], existing["created"], summary or existing.get("summary", ""))
-                _record_story_source(c, existing["id"], source, title, summary, url, published_at)
-                c.execute(
-                    """UPDATE stories SET sources=%s,source_count=%s,
-                       published_at=COALESCE(published_at,%s),research_flags=%s,
-                       evidence_status=%s,is_breaking_candidate=%s,updated_at=NOW()
-                       WHERE id=%s""",
-                    (Jsonb(names), len(names), published_at, Jsonb(flags), evidence, breaking, existing["id"])
-                )
-                return "matched"
+    existing = c.execute(
+        "SELECT id,sources,source_count,published_at,created FROM stories WHERE url=%s",
+        (url,)
+    ).fetchone()
+    if existing:
+        names = list(existing["sources"] or [])
+        if source not in names:
+            names.append(source)
+            flags, evidence, breaking = _research_metadata(names, published_at or existing["published_at"], existing["created"], summary or existing.get("summary", ""))
             _record_story_source(c, existing["id"], source, title, summary, url, published_at)
-            return "duplicate"
-
-        rows = c.execute(
-            """SELECT id,title,summary,sources,source_count,category,published_at,created
-               FROM stories
-               ORDER BY id DESC LIMIT 500"""
-        ).fetchall()
-        match = None
-        for row in rows:
-            score = _title_similarity(title, row["title"])
-            same_category = row["category"] == category or row["category"] in ("Other", "Uncategorized") or category == "Other"
-            if score >= 0.84 and same_category:
-                # Similar headlines published far apart should remain separate stories.
-                if published_at and row["published_at"]:
-                    age_gap = abs((published_at - row["published_at"]).total_seconds())
-                    if age_gap > 48 * 3600:
-                        continue
-                match = row
-                break
-
-        if match:
-            names = list(match["sources"] or [])
-            if source not in names:
-                names.append(source)
-            flags, evidence, breaking = _research_metadata(names, match["published_at"] or published_at, match["created"], match["summary"] or summary)
-            _record_story_source(c, match["id"], source, title, summary, url, published_at)
             c.execute(
                 """UPDATE stories SET sources=%s,source_count=%s,
-                   summary=CASE WHEN summary='' AND %s<>'' THEN %s ELSE summary END,
                    published_at=COALESCE(published_at,%s),research_flags=%s,
                    evidence_status=%s,is_breaking_candidate=%s,updated_at=NOW()
                    WHERE id=%s""",
-                (Jsonb(names), len(names), (summary or "")[:4000], (summary or "")[:4000],
-                 published_at, Jsonb(flags), evidence, breaking, match["id"])
+                (Jsonb(names), len(names), published_at, Jsonb(flags), evidence, breaking, existing["id"])
             )
             return "matched"
+        _record_story_source(c, existing["id"], source, title, summary, url, published_at)
+        return "duplicate"
 
-        names = [source]
-        flags, evidence, breaking = _research_metadata(names, published_at, summary=summary)
-        group_key = hashlib.md5(_normalized_title(title).encode("utf-8")).hexdigest()
-        row = c.execute(
-            """INSERT INTO stories(
-                title,summary,url,source_name,sources,source_count,category,draft,status,
-                published_at,research_flags,evidence_status,is_breaking_candidate,duplicate_group_key
-            ) VALUES(%s,%s,%s,%s,%s,1,%s,'','draft',%s,%s,%s,%s,%s)
-            RETURNING id""",
-            (title[:400], (summary or "")[:4000], url, source, Jsonb(names), category,
-             published_at, Jsonb(flags), evidence, breaking, group_key)
-        ).fetchone()
-        sid = row["id"]
-        _record_story_source(c, sid, source, title, summary, url, published_at)
+    rows = c.execute(
+        """SELECT id,title,summary,sources,source_count,category,published_at,created
+           FROM stories
+           ORDER BY id DESC LIMIT 500"""
+    ).fetchall()
+    match = None
+    for row in rows:
+        score = _title_similarity(title, row["title"])
+        same_category = row["category"] == category or row["category"] in ("Other", "Uncategorized") or category == "Other"
+        if score >= 0.84 and same_category:
+            # Similar headlines published far apart should remain separate stories.
+            if published_at and row["published_at"]:
+                age_gap = abs((published_at - row["published_at"]).total_seconds())
+                if age_gap > 48 * 3600:
+                    continue
+            match = row
+            break
+
+    if match:
+        names = list(match["sources"] or [])
+        if source not in names:
+            names.append(source)
+        flags, evidence, breaking = _research_metadata(names, match["published_at"] or published_at, match["created"], match["summary"] or summary)
+        _record_story_source(c, match["id"], source, title, summary, url, published_at)
         c.execute(
-            "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
-            ("story_collected", "A story was collected and classified for editorial research.", Jsonb({
-                "story_id": sid, "source": source, "category": category, "evidence_status": evidence
-            }))
+            """UPDATE stories SET sources=%s,source_count=%s,
+               summary=CASE WHEN summary='' AND %s<>'' THEN %s ELSE summary END,
+               published_at=COALESCE(published_at,%s),research_flags=%s,
+               evidence_status=%s,is_breaking_candidate=%s,updated_at=NOW()
+               WHERE id=%s""",
+            (Jsonb(names), len(names), (summary or "")[:4000], (summary or "")[:4000],
+             published_at, Jsonb(flags), evidence, breaking, match["id"])
         )
+        return "matched"
+
+    names = [source]
+    flags, evidence, breaking = _research_metadata(names, published_at, summary=summary)
+    group_key = hashlib.md5(_normalized_title(title).encode("utf-8")).hexdigest()
+    row = c.execute(
+        """INSERT INTO stories(
+            title,summary,url,source_name,sources,source_count,category,draft,status,
+            published_at,research_flags,evidence_status,is_breaking_candidate,duplicate_group_key
+        ) VALUES(%s,%s,%s,%s,%s,1,%s,'','draft',%s,%s,%s,%s,%s)
+        RETURNING id""",
+        (title[:400], (summary or "")[:4000], url, source, Jsonb(names), category,
+         published_at, Jsonb(flags), evidence, breaking, group_key)
+    ).fetchone()
+    sid = row["id"]
+    _record_story_source(c, sid, source, title, summary, url, published_at)
+    c.execute(
+        "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+        ("story_collected", "A story was collected and classified for editorial research.", Jsonb({
+            "story_id": sid, "source": source, "category": category, "evidence_status": evidence
+        }))
+    )
     return "new"
 
+def add(title, summary, url, source, published_at=None):
+    with conn() as c:
+        return _add_with_conn(c, title, summary, url, source, published_at)
 
 def _collect_one(feed):
     result = {
@@ -753,16 +755,17 @@ def _collect_one(feed):
         parsed = _fetch_feed(feed["url"])
         entries = parsed.entries[:50]
         result["items_seen"] = len(entries)
-        for entry in entries:
-            title = _plain_text(entry.get("title", "") if isinstance(entry, dict) else getattr(entry, "title", ""))
-            link = str(entry.get("link", "") if isinstance(entry, dict) else (getattr(entry, "link", "") or "")).strip()
-            summary = _plain_text(entry.get("summary", "") if isinstance(entry, dict) else (getattr(entry, "summary", "") or getattr(entry, "description", "")))
-            published_at = _published_datetime(entry) if isinstance(entry, dict) else None
-            if not title or not link.startswith(("https://", "http://")):
-                result["duplicates"] += 1
-                continue
-            outcome = add(title, summary, link, feed["name"], published_at)
-            result["duplicates" if outcome == "duplicate" else outcome] += 1
+        with conn() as c:
+            for entry in entries:
+                title = _plain_text(entry.get("title", "") if isinstance(entry, dict) else getattr(entry, "title", ""))
+                link = str(entry.get("link", "") if isinstance(entry, dict) else (getattr(entry, "link", "") or "")).strip()
+                summary = _plain_text(entry.get("summary", "") if isinstance(entry, dict) else (getattr(entry, "summary", "") or getattr(entry, "description", "")))
+                published_at = _published_datetime(entry)
+                if not title or not link.startswith(("https://", "http://")):
+                    result["duplicates"] += 1
+                    continue
+                outcome = _add_with_conn(c, title, summary, link, feed["name"], published_at)
+                result["duplicates" if outcome == "duplicate" else outcome] += 1
         with conn() as c:
             c.execute("""
                 UPDATE sources
