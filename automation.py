@@ -376,7 +376,7 @@ def draft(title, summary, url=None):
             status = str(provider_error.get("status", "")).strip()
         except Exception:
             reason, status = "", ""
-        reason = re.sub(r"\\s+", " ", reason)[:240]
+        reason = re.sub(r"\s+", " ", reason)[:240]
         if key:
             reason = reason.replace(key, "[redacted]")
         detail = f" Gemini says: {reason}" if reason else ""
