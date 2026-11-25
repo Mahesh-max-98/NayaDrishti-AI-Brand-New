@@ -1229,7 +1229,17 @@ DATABASE_INITIALIZED = False
 if DATABASE_URL:
     try:
         init()
-        seed_default_sources()
+        # Do not reseed or rewrite the 25 source rows on every rolling deploy.
+        # Startup reseeding can contend with the live collector; seed only on a
+        # genuinely empty first-install database.
+        with conn() as startup_conn:
+            existing_source_count = startup_conn.execute(
+                "SELECT COUNT(*)::int AS count FROM sources"
+            ).fetchone()["count"]
+        if existing_source_count == 0:
+            seed_default_sources()
+        else:
+            logger.info("Using %s existing news sources; skipped startup reseeding.", existing_source_count)
         _backfill_research_fields()
         _repair_research_signals()
         DATABASE_INITIALIZED = True
