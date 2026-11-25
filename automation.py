@@ -39,6 +39,27 @@ def conn():
     return c
 
 
+DEFAULT_SOURCES = [
+    ("Onlinekhabar", "https://www.onlinekhabar.com/feed"),
+    ("Setopati", "https://www.setopati.com/feed"),
+    ("Ratopati", "https://www.ratopati.com/feed"),
+    ("Artha Sarokar", "https://arthasarokar.com/feed"),
+    ("Rajdhani Daily", "https://rajdhanidaily.com/feed"),
+    ("News of Nepal", "https://newsofnepal.com/feed"),
+    ("Techmandu", "https://techmandu.com/feed"),
+]
+
+
+def seed_default_sources():
+    """Install known public Nepal-news RSS feeds without admin data entry."""
+    with conn() as c:
+        for name, url in DEFAULT_SOURCES:
+            c.execute(
+                "INSERT INTO sources(name,url) VALUES(%s,%s) ON CONFLICT(url) DO NOTHING",
+                (name, url)
+            )
+
+
 def init():
     with conn() as c:
         c.execute("""
@@ -297,9 +318,7 @@ def add(title, summary, url, source):
             "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
             ("story_collected", "A story was collected from a configured source.", Jsonb({"story_id": sid, "source": source}))
         )
-    generated = draft(title, summary, url)
-    with conn() as c:
-        c.execute("UPDATE stories SET draft=%s,updated_at=NOW() WHERE id=%s", (generated, sid))
+    # Phase 3 only collects and stores source material. Nepali AI writing is Phase 5.
     return "new"
 
 
@@ -370,8 +389,15 @@ def publish(sid, manual=False):
 
 
 def cycle():
-    # Scheduled collection and publishing automation are introduced in Phase 7/9.
-    return
+    """Collect feeds automatically during the requested Nepal-time monitoring window."""
+    now = datetime.now().astimezone()
+    local = now.astimezone(__import__("zoneinfo").ZoneInfo("Asia/Kathmandu"))
+    if local.hour < 5 or (local.hour > 22 or (local.hour == 22 and local.minute > 55)):
+        return
+    try:
+        collect()
+    except Exception:
+        logger.exception("Scheduled news collection failed.")
 
 
 # Initialize the schema only when a DATABASE_URL is configured. A connection
@@ -379,13 +405,18 @@ def cycle():
 if DATABASE_URL:
     try:
         init()
+        seed_default_sources()
     except Exception:
-        logger.exception("PostgreSQL schema initialization failed.")
+        logger.exception("PostgreSQL schema initialization or default source setup failed.")
 
 
 scheduler = BackgroundScheduler(timezone="Asia/Kathmandu")
-scheduler.add_job(cycle, "interval", minutes=15, id="auto-publish", replace_existing=True, max_instances=1, coalesce=True)
-if os.getenv("ADMIN_PASSWORD"):
+scheduler.add_job(
+    cycle, "interval", minutes=5, id="automatic-news-collection",
+    replace_existing=True, max_instances=1, coalesce=True,
+    next_run_time=datetime.now(timezone.utc)
+)
+if os.getenv("ADMIN_PASSWORD") and DATABASE_URL:
     scheduler.start()
 
 
@@ -393,9 +424,9 @@ LOGIN = """<!doctype html><meta name=viewport content='width=device-width,initia
 PANEL = """<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>NayaDrishti Newsroom</title><style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{background:#0b1220;color:#eef4ff;font:14px system-ui;margin:0;padding:22px;max-width:1180px;margin:auto}h1{margin:8px 0}h2{margin:0 0 12px}.muted{color:#9aabc2}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.card{background:#152238;border:1px solid #30425c;border-radius:14px;padding:16px;margin:14px 0}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.stat{background:#0e192a;border:1px solid #30425c;padding:12px;border-radius:10px}.stat strong{font-size:23px;display:block}.stat span{color:#9aabc2;font-size:12px}input,button{padding:10px;border-radius:8px;margin:4px;border:1px solid #40536e}input{background:#0b1423;color:white;max-width:100%}button{background:#75e0c0;color:#071521;border:0;font-weight:700;cursor:pointer}button.secondary{background:#263a55;color:#eef4ff;border:1px solid #40536e}button.danger{background:#572e3b;color:#ffe7ed;border:1px solid #87475c}button:disabled{opacity:.5;cursor:wait}.feed{border-top:1px solid #30425c;padding:12px 0;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.feed small{display:block;color:#9aabc2;overflow-wrap:anywhere}.feed-actions{display:flex;gap:4px;flex-wrap:wrap}.pill{font-size:11px;padding:3px 8px;border-radius:20px;background:#263a55}.ok{color:#75e0c0}.bad{color:#ff9eae}.warn{color:#ffd58a}.story{border-top:1px solid #30425c;padding:12px 0}.story h3{margin:0 0 5px;font-size:15px}.story a{color:#8bc4ff}@media(max-width:700px){body{padding:12px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.feed{align-items:flex-start}}
 </style>
-<div class=top><div><h1>NayaDrishti AI Newsroom</h1><p class=muted>Phase 3 · Source management and manual RSS collection</p></div><a href=/admin/logout style=color:#8bc4ff>Sign out</a></div>
+<div class=top><div><h1>NayaDrishti AI Newsroom</h1><p class=muted>Automatic Nepali news collection · refreshed every 5 minutes</p></div><a href=/admin/logout style=color:#8bc4ff>Sign out</a></div>
 <div class=grid><div class=stat><strong id=total>—</strong><span>Total sources</span></div><div class=stat><strong id=enabled>—</strong><span>Enabled sources</span></div><div class=stat><strong id=healthy>—</strong><span>Healthy sources</span></div><div class=stat><strong id=storiesCount>—</strong><span>Collected stories</span></div></div>
-<div class=card><h2>Add RSS / Atom source</h2><p class=muted>Enter the publisher name and its actual RSS or Atom feed URL. A normal homepage URL may not be a feed.</p><form id=addForm><input id=sourceName placeholder='Source name' required maxlength=100><input id=sourceUrl placeholder='https://example.com/feed' required style='width:min(560px,95%)'><button id=addBtn>Add source</button></form><p id=message class=muted aria-live=polite></p></div>
+<div class=card><h2>Automatic source setup</h2><p class=muted>NayaDrishti preloads available public Nepali news RSS feeds. You do not need to enter feed links. You can still add or manage sources below if needed.</p><form id=addForm><input id=sourceName placeholder='Source name' required maxlength=100><input id=sourceUrl placeholder='https://example.com/feed' required style='width:min(560px,95%)'><button id=addBtn>Add source</button></form><p id=message class=muted aria-live=polite></p></div>
 <div class=card><div class=top><div><h2>News sources</h2><p class=muted>Enable, edit, check health or remove a source.</p></div><button id=collectBtn>Collect news now</button></div><div id=feeds>Loading sources…</div></div>
 <div class=card><h2>Latest collected stories</h2><p class=muted>Original article links are kept for editorial verification. Stories are not published to Facebook.</p><div id=stories>Loading…</div></div>
 <script>
@@ -410,6 +441,7 @@ $('addForm').addEventListener('submit',async e=>{e.preventDefault();$('addBtn').
 $('feeds').addEventListener('click',async e=>{const b=e.target.closest('button[data-action]');if(!b)return;const id=b.dataset.id;try{if(b.dataset.action==='toggle'){await api('/api/admin/sources/'+id,'PATCH',{enabled:b.dataset.enabled==='true'})}else if(b.dataset.action==='edit'){const name=prompt('Source name:',b.dataset.name);if(name===null)return;const url=prompt('RSS / Atom feed URL:',b.dataset.url);if(url===null)return;await api('/api/admin/sources/'+id,'PATCH',{name,url})}else if(b.dataset.action==='delete'){if(!confirm('Remove this source? Previously collected stories will remain.'))return;await api('/api/admin/sources/'+id,'DELETE')}await load()}catch(err){alert(err.message)}});
 $('collectBtn').addEventListener('click',async()=>{const b=$('collectBtn');b.disabled=true;b.textContent='Collecting…';$('message').textContent='Checking enabled RSS feeds…';try{const d=await api('/api/admin/collect','POST',{});$('message').textContent='Checked '+d.checked+' source(s): '+d.new+' new stories, '+d.matched+' similar-story matches, '+d.duplicates+' duplicates, '+d.failed+' failures.';await load();if(d.failed)alert('Some sources failed. Their error details are shown in Source Health.')}catch(e){$('message').textContent=e.message}finally{b.disabled=false;b.textContent='Collect news now'}});
 load();
+setInterval(load, 60000);
 </script>"""
 
 
