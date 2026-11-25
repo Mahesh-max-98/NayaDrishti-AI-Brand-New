@@ -243,6 +243,7 @@ def database_status():
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=4) AS provenance_migration_ready,
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=5) AS research_backfill_ready,
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=6) AS publisher_provenance_ready,
+                       EXISTS(SELECT 1 FROM schema_migrations WHERE version=7) AS research_signal_repair_ready,
                        (SELECT COUNT(*) FROM information_schema.columns
                         WHERE table_schema='public' AND table_name='sources'
                         AND column_name IN ('last_item_count','consecutive_failures'))=2 AS source_health_fields_ready,
@@ -252,7 +253,7 @@ def database_status():
             ready = all(row[k] for k in (
                 "migrations_ready", "sources_ready", "stories_ready",
                 "settings_ready", "revisions_ready", "logs_ready", "story_sources_ready",
-                "migration_applied", "source_migration_ready", "research_migration_ready", "provenance_migration_ready", "research_backfill_ready", "publisher_provenance_ready",
+                "migration_applied", "source_migration_ready", "research_migration_ready", "provenance_migration_ready", "research_backfill_ready", "publisher_provenance_ready", "research_signal_repair_ready",
                 "source_health_fields_ready", "default_settings_ready"
             ))
             if not ready:
@@ -888,6 +889,37 @@ def cycle():
         logger.exception("Scheduled news collection failed.")
 
 
+def _repair_research_signals():
+    """Recalculate all editorial evidence signals once using consistent rules."""
+    with conn() as c:
+        c.execute("SELECT pg_advisory_xact_lock(734921004)")
+        done = c.execute(
+            "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=7) AS done"
+        ).fetchone()["done"]
+        if done:
+            return
+        c.execute("""
+            UPDATE stories
+            SET research_flags =
+                (CASE WHEN COALESCE(summary,'')='' THEN jsonb_build_array('headline_only_no_article_summary') ELSE '[]'::jsonb END) ||
+                (CASE WHEN published_at IS NULL THEN jsonb_build_array('publication_time_unknown') ELSE '[]'::jsonb END) ||
+                (CASE WHEN published_at < NOW() - INTERVAL '48 hours' THEN jsonb_build_array('possibly_old_news') ELSE '[]'::jsonb END) ||
+                (CASE WHEN source_count >= 2 THEN jsonb_build_array('similar_headline_seen_in_multiple_sources') ELSE '[]'::jsonb END) ||
+                (CASE WHEN source_count >= 3 AND published_at BETWEEN NOW() - INTERVAL '6 hours' AND NOW()
+                      THEN jsonb_build_array('breaking_candidate_requires_editorial_verification') ELSE '[]'::jsonb END),
+                evidence_status = CASE
+                    WHEN source_count >= 2 THEN 'multiple_source_headline_match_only'
+                    WHEN COALESCE(summary,'')='' THEN 'headline_only_single_source'
+                    ELSE 'single_source_with_summary'
+                END,
+                is_breaking_candidate = (
+                    source_count >= 3
+                    AND published_at BETWEEN NOW() - INTERVAL '6 hours' AND NOW()
+                )
+        """)
+        c.execute("INSERT INTO schema_migrations(version) VALUES(7) ON CONFLICT(version) DO NOTHING")
+
+
 # Initialize the schema only when a DATABASE_URL is configured. A connection
 # problem is reported by /ready rather than crashing the web process.
 DATABASE_INITIALIZED = False
@@ -896,6 +928,7 @@ if DATABASE_URL:
         init()
         seed_default_sources()
         _backfill_research_fields()
+        _repair_research_signals()
         DATABASE_INITIALIZED = True
     except Exception:
         logger.exception("PostgreSQL schema initialization or default source setup failed; scheduler will remain stopped.")
