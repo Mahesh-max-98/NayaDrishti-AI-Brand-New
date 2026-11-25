@@ -44,7 +44,7 @@ def conn():
 # RSS feeds are used where available. For outlets without a verified feed,
 # the collector reads the public homepage and extracts same-site article links.
 DEFAULT_SOURCES = [
-    ("RONB / Routine of Nepal Banda", "https://www.ronbpost.com/"),
+    ("RONB / Routine of Nepal Banda", "https://ronbpost.com/"),
     ("BBC Nepali", "https://www.bbc.com/nepali"),
     ("Onlinekhabar", "https://www.onlinekhabar.com/feed"),
     ("OK Khabar", "https://okkhabar.com/"),
@@ -54,7 +54,7 @@ DEFAULT_SOURCES = [
     ("Ratopati", "https://www.ratopati.com/feed"),
     ("Annapurna Post", "https://annapurnapost.com/"),
     ("Setopati", "https://www.setopati.com/feed"),
-    ("Nagarik News", "https://nagariknews.nagariknetwork.com/feed"),
+    ("Nagarik News", "https://nagariknews.nagariknetwork.com.com/feed"),
     ("Gorkhapatra", "https://gorkhapatraonline.com/rss"),
     ("Ujyaalo Online", "https://www.ujyaaloonline.com/"),
     ("Thaha Khabar", "https://thahakhabar.com/"),
@@ -66,24 +66,26 @@ DEFAULT_SOURCES = [
     ("News of Nepal", "https://newsofnepal.com/feed"),
     ("Techmandu", "https://techmandu.com/feed"),
     ("The Rising Nepal (Government-owned)", "https://risingnepaldaily.com/"),
+    ("Khabarhub", "https://khabarhub.com/"),
+    ("Nepal Press", "https://nepalpress.com/"),
+    ("myRepublica", "https://myrepublica.nagariknetwork.com/"),
 ]
 
 
 def seed_default_sources():
     """Install known public Nepal-news RSS feeds without admin data entry."""
     with conn() as c:
-        # Migrate default sources whose verified RSS endpoints changed.
-        for name, old_url, new_url in (
-            ("Nagarik News", "https://nagariknews.nagariknetwork.com/", "https://nagariknews.nagariknetwork/feed"),
-            ("Gorkhapatra", "https://gorkhapatraonline.com/", "https://gorkhapatraonline.com/rss"),
+        # Remove duplicate URL variants so each publisher has one source row.
+        for name, keep_url, duplicate_urls in (
+            ("Laliguras Media Network", "https://www.laligurash.com/", ["https://english.laligurash.com/"]),
+            ("Nagarik News", "https://nagariknews.nagariknetwork.com/feed", ["https://nagariknews.nagariknetwork/feed", "https://nagariknews.nagariknetwork.com/"]),
+            ("RONB / Routine of Nepal Banda", "https://ronbpost.com/", ["https://www.ronbpost.com/"]),
         ):
+            for duplicate_url in duplicate_urls:
+                c.execute("DELETE FROM sources WHERE url=%s AND EXISTS (SELECT 1 FROM sources WHERE url=%s)", (duplicate_url, keep_url))
             c.execute(
-                "DELETE FROM sources WHERE name=%s AND url=%s AND EXISTS (SELECT 1 FROM sources WHERE url=%s)",
-                (name, old_url, new_url)
-            )
-            c.execute(
-                "UPDATE sources SET url=%s,last_checked=NULL,last_success=NULL,last_error=NULL,last_item_count=0,consecutive_failures=0 WHERE name=%s AND url=%s",
-                (new_url, name, old_url)
+                "UPDATE sources SET name=%s,url=%s,last_checked=NULL,last_success=NULL,last_error=NULL,last_item_count=0,consecutive_failures=0 WHERE url=%s AND NOT EXISTS (SELECT 1 FROM sources WHERE url=%s)",
+                (name, keep_url, duplicate_urls[0], keep_url)
             )
         for name, url in DEFAULT_SOURCES:
             c.execute(
@@ -291,6 +293,23 @@ class _SafeFeedRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+class _FeedDiscoveryParser(HTMLParser):
+    def __init__(self, base_url):
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.feeds = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != "link":
+            return
+        item = {str(k).lower(): (v or "") for k, v in attrs}
+        rel = item.get("rel", "").lower().split()
+        typ = item.get("type", "").lower()
+        href = item.get("href", "").strip()
+        if "alternate" in rel and href and ("rss" in typ or "atom" in typ or "xml" in typ):
+            self.feeds.append(urllib.parse.urljoin(self.base_url, href))
+
+
 class _HomepageLinks(HTMLParser):
     """Extract article-like same-site links from public HTML pages."""
     def __init__(self, base_url):
@@ -331,37 +350,81 @@ class _HomepageLinks(HTMLParser):
 
 
 def _fetch_feed(url):
-    _validate_feed_url(url)
-    opener = urllib.request.build_opener(_SafeFeedRedirect())
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html, */*",
-            "Accept-Language": "ne-NP,ne;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Cache-Control": "no-cache"
-        }
-    )
-    with opener.open(req, timeout=18) as response:
-        status = getattr(response, "status", 200)
-        if status < 200 or status >= 300:
-            raise RuntimeError("Source server returned HTTP " + str(status))
-        payload = response.read(4 * 1024 * 1024 + 1)
-        if len(payload) > 4 * 1024 * 1024:
-            raise RuntimeError("Source page is larger than the 4 MB safety limit.")
-        headers = dict(response.headers.items())
-        parsed = feedparser.parse(payload, response_headers=headers)
-    if parsed.entries:
-        return parsed
-    # Several requested publishers expose no discoverable RSS feed. Read only
-    # their public homepage/notice page and collect same-domain article links.
-    # Use the final URL after a permitted same-site redirect so canonical
-    # www/non-www links are still recognized as belonging to this publisher.
-    parser = _HomepageLinks(response.geturl())
-    parser.feed(payload.decode("utf-8", errors="replace"))
-    class _Result:
-        entries = parser.entries
-    return _Result()
+    parsed_url = urllib.parse.urlsplit(url)
+    base = urllib.parse.urlunsplit((parsed_url.scheme, parsed_url.netloc, "/", "", ""))
+    candidates = [url]
+    for path in ("/feed", "/feed/", "/rss", "/rss.xml", "/feed.xml", "/atom.xml"):
+        candidate = urllib.parse.urljoin(base, path.lstrip("/"))
+        if candidate not in candidates:
+            candidates.append(candidate)
+
+    last_error = None
+    for candidate in candidates:
+        try:
+            _validate_feed_url(candidate)
+            opener = urllib.request.build_opener(_SafeFeedRedirect())
+            req = urllib.request.Request(
+                candidate,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                    "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html, */*",
+                    "Accept-Language": "ne-NP,ne;q=0.9,en-US;q=0.8,en;q=0.7",
+                    "Cache-Control": "no-cache"
+                }
+            )
+            with opener.open(req, timeout=18) as response:
+                status = getattr(response, "status", 200)
+                if status < 200 or status >= 300:
+                    raise RuntimeError("Source server returned HTTP " + str(status))
+                payload = response.read(4 * 1024 * 1024 + 1)
+                if len(payload) > 4 * 1024 * 1024:
+                    raise RuntimeError("Source page is larger than the 4 MB safety limit.")
+                headers = dict(response.headers.items())
+                final_url = response.geturl()
+            parsed = feedparser.parse(payload, response_headers=headers)
+            if parsed.entries:
+                return parsed
+
+            # Discover publisher-advertised RSS/Atom feeds from the HTML head.
+            text_payload = payload.decode("utf-8", errors="replace")
+            discovery = _FeedDiscoveryParser(final_url)
+            discovery.feed(text_payload)
+            for feed_url in discovery.feeds:
+                if feed_url == candidate:
+                    continue
+                try:
+                    _validate_feed_url(feed_url)
+                    feed_req = urllib.request.Request(feed_url, headers={
+                        "User-Agent": "Mozilla/5.0 (compatible; NayaDrishtiNewsCollector/1.0)",
+                        "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*"
+                    })
+                    with opener.open(feed_req, timeout=18) as feed_response:
+                        feed_payload = feed_response.read(4 * 1024 * 1024 + 1)
+                        if len(feed_payload) > 4 * 1024 * 1024:
+                            continue
+                        discovered = feedparser.parse(feed_payload, response_headers=dict(feed_response.headers.items()))
+                    if discovered.entries:
+                        return discovered
+                except Exception as exc:
+                    last_error = exc
+
+            # Fall back to same-site article links on the publisher homepage.
+            if "text/html" in headers.get("Content-Type", "").lower() or b"<html" in payload[:1000].lower():
+                parser = _HomepageLinks(final_url)
+                parser.feed(text_payload)
+                if parser.entries:
+                    class _Result:
+                        entries = parser.entries
+                    return _Result()
+            # Keep trying alternate common feed paths if this candidate had no items.
+            last_error = RuntimeError("No RSS entries, advertised feed, or readable article links were found.")
+        except Exception as exc:
+            last_error = exc
+            continue
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("No usable feed endpoint was found for this publisher.")
 
 
 def _plain_text(value):
