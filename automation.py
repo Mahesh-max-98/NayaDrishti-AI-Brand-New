@@ -54,7 +54,7 @@ DEFAULT_SOURCES = [
     ("Ratopati", "https://www.ratopati.com/feed"),
     ("Annapurna Post", "https://annapurnapost.com/"),
     ("Setopati", "https://www.setopati.com/feed"),
-    ("Nagarik News", "https://nagariknews.nagariknetwork.com.com/feed"),
+    ("Nagarik News", "https://nagariknews.nagariknetwork.com/feed"),
     ("Gorkhapatra", "https://gorkhapatraonline.com/rss"),
     ("Ujyaalo Online", "https://www.ujyaaloonline.com/"),
     ("Thaha Khabar", "https://thahakhabar.com/"),
