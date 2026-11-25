@@ -104,12 +104,20 @@ def seed_default_sources():
 
 def init():
     with conn() as c:
+        # Serialize startup migrations across overlapping Render deploy instances.
+        c.execute("SELECT pg_advisory_xact_lock(734921004)")
         c.execute("""
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version INTEGER PRIMARY KEY,
                 applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
+        current_version = c.execute(
+            "SELECT COALESCE(MAX(version),0)::int AS version FROM schema_migrations"
+        ).fetchone()["version"]
+        # Avoid taking AccessExclusive locks on live newsroom tables at every restart.
+        if current_version >= 4:
+            return
         c.execute("""
             CREATE TABLE IF NOT EXISTS sources (
                 id BIGSERIAL PRIMARY KEY,
@@ -578,9 +586,14 @@ def _record_story_source(c, story_id, source, title, summary, url, published_at)
 
 
 def _backfill_research_fields():
-    # One set-based UPDATE avoids hundreds of round trips to the remote database
-    # during startup and keeps the web service responsive.
+    # One-time, serialized backfill; do not rewrite the entire newsroom on each restart.
     with conn() as c:
+        c.execute("SELECT pg_advisory_xact_lock(734921004)")
+        done = c.execute(
+            "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=5) AS done"
+        ).fetchone()["done"]
+        if done:
+            return
         c.execute("""
             INSERT INTO story_sources(story_id,source_name,article_url,title,summary,published_at)
             SELECT id,source_name,url,title,summary,published_at FROM stories
@@ -615,6 +628,7 @@ def _backfill_research_fields():
             duplicate_group_key = md5(regexp_replace(lower(title), '[[:space:][:punct:]]+', ' ', 'g'))
             WHERE category = 'Uncategorized' OR duplicate_group_key IS NULL
         """)
+        c.execute("INSERT INTO schema_migrations(version) VALUES(5) ON CONFLICT(version) DO NOTHING")
 
 def add(title, summary, url, source, published_at=None):
     if not title or not url.startswith(("http://", "https://")):
@@ -797,13 +811,15 @@ def cycle():
 
 # Initialize the schema only when a DATABASE_URL is configured. A connection
 # problem is reported by /ready rather than crashing the web process.
+DATABASE_INITIALIZED = False
 if DATABASE_URL:
     try:
         init()
         seed_default_sources()
         _backfill_research_fields()
+        DATABASE_INITIALIZED = True
     except Exception:
-        logger.exception("PostgreSQL schema initialization or default source setup failed.")
+        logger.exception("PostgreSQL schema initialization or default source setup failed; scheduler will remain stopped.")
 
 
 scheduler = BackgroundScheduler(timezone="Asia/Kathmandu")
@@ -812,7 +828,7 @@ scheduler.add_job(
     replace_existing=True, max_instances=1, coalesce=True,
     next_run_time=datetime.now(timezone.utc)
 )
-if DATABASE_URL:
+if DATABASE_INITIALIZED:
     try:
         scheduler.start()
         logger.info("Automatic Nepali news collection scheduler started.")
