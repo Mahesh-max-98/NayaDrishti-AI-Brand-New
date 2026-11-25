@@ -1770,12 +1770,12 @@ def approve_story_draft(sid):
         if not str(row["url"] or "").startswith(("http://","https://")):
             return jsonify({"error":"The original report link is missing. Verify the source before approval."}),400
         content = _remove_comment_on_heading(row["draft"])
-        if len(content) < 90 or not re.search(r"[\\u0900-\\u097F]", content):
+        if len(content) < 90 or not re.search(r"[\u0900-\u097F]", content):
             return jsonify({"error":"The draft is too short or is not in Nepali. Edit it into a complete, meaningful post before approval."}),400
         if len(re.findall(r"[।!?]", content)) < 1:
             return jsonify({"error":"The draft needs a complete sentence before approval."}),400
         def _approval_key(value):
-            return re.sub(r"[\\W_]+", "", str(value or "").lower(), flags=re.UNICODE)
+            return re.sub(r"[\W_]+", "", str(value or "").lower(), flags=re.UNICODE)
         title_key = _approval_key(row["title"])
         draft_key = _approval_key(content)
         if title_key and draft_key and SequenceMatcher(None, title_key, draft_key[:len(title_key)*2]).ratio() >= 0.92:
