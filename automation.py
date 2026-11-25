@@ -429,16 +429,35 @@ def panel():
 @auth
 def status():
     with conn() as c:
-        feeds = c.execute("SELECT name,url FROM sources ORDER BY name").fetchall()
+        feeds = c.execute("""
+            SELECT id,name,url,enabled,last_checked,last_success,last_error,
+                   last_item_count,consecutive_failures
+            FROM sources ORDER BY name
+        """).fetchall()
         rows = c.execute(
-            "SELECT id,title,url,source_name,source_count,draft,status,post_id FROM stories ORDER BY id DESC LIMIT 50"
+            "SELECT id,title,summary,url,source_name,source_count,draft,status,post_id FROM stories ORDER BY id DESC LIMIT 50"
         ).fetchall()
+        summary = c.execute("""
+            SELECT
+              COUNT(*)::int AS total_sources,
+              COUNT(*) FILTER (WHERE enabled)::int AS enabled_sources,
+              COUNT(*) FILTER (WHERE enabled AND last_success IS NOT NULL AND last_error IS NULL)::int AS healthy_sources
+            FROM sources
+        """).fetchone()
+        story_count = c.execute("SELECT COUNT(*)::int AS count FROM stories").fetchone()["count"]
     return jsonify({
         "facebook": False,
         "auto": False,
+        "summary": {**dict(summary), "stories": story_count},
         "sources": [dict(x) for x in feeds],
         "stories": [dict(x) for x in rows]
     })
+
+
+def _validate_feed_url_syntax(url):
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("https", "http") or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("Enter a valid public HTTP or HTTPS RSS / Atom feed URL.")
 
 
 @bp.post("/api/admin/sources")
@@ -447,21 +466,81 @@ def source_add():
     data = request.get_json(silent=True) or {}
     name = str(data.get("name", "")).strip()[:100]
     url = str(data.get("url", "")).strip()
-    if not name or not url.startswith(("https://", "http://")):
-        return jsonify({"error": "Enter a source name and valid RSS URL."}), 400
+    try:
+        _validate_feed_url_syntax(url)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if not name:
+        return jsonify({"error": "Enter a source name."}), 400
     try:
         with conn() as c:
             c.execute("INSERT INTO sources(name,url) VALUES(%s,%s)", (name, url))
+            c.execute(
+                "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+                ("source_added", "An RSS source was added.", Jsonb({"source_name": name}))
+            )
     except psycopg.errors.UniqueViolation:
-        return jsonify({"error": "This feed is already added."}), 409
+        return jsonify({"error": "This feed URL is already registered."}), 409
+    return jsonify({"ok": True})
+
+
+@bp.patch("/api/admin/sources/<int:sid>")
+@auth
+def source_update(sid):
+    data = request.get_json(silent=True) or {}
+    allowed = {"name", "url", "enabled"}
+    if not data or not set(data).issubset(allowed):
+        return jsonify({"error": "Only source name, feed URL or enabled status can be changed."}), 400
+    with conn() as c:
+        current = c.execute("SELECT id,name,url,enabled FROM sources WHERE id=%s", (sid,)).fetchone()
+    if not current:
+        return jsonify({"error": "Source not found."}), 404
+    name = str(data.get("name", current["name"])).strip()[:100]
+    url = str(data.get("url", current["url"])).strip()
+    enabled = data.get("enabled", current["enabled"])
+    if not name:
+        return jsonify({"error": "Source name cannot be empty."}), 400
+    if not isinstance(enabled, bool):
+        return jsonify({"error": "Enabled must be true or false."}), 400
+    try:
+        _validate_feed_url_syntax(url)
+        with conn() as c:
+            c.execute("""
+                UPDATE sources
+                SET name=%s,url=%s,enabled=%s,
+                    last_checked=CASE WHEN url<>%s THEN NULL ELSE last_checked END,
+                    last_success=CASE WHEN url<>%s THEN NULL ELSE last_success END,
+                    last_error=CASE WHEN url<>%s THEN NULL ELSE last_error END,
+                    last_item_count=CASE WHEN url<>%s THEN 0 ELSE last_item_count END,
+                    consecutive_failures=CASE WHEN url<>%s THEN 0 ELSE consecutive_failures END
+                WHERE id=%s
+            """, (name,url,enabled,url,url,url,url,url,sid))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except psycopg.errors.UniqueViolation:
+        return jsonify({"error": "Another source already uses this feed URL."}), 409
+    return jsonify({"ok": True})
+
+
+@bp.delete("/api/admin/sources/<int:sid>")
+@auth
+def source_delete(sid):
+    with conn() as c:
+        row = c.execute("SELECT name FROM sources WHERE id=%s", (sid,)).fetchone()
+        if not row:
+            return jsonify({"error": "Source not found."}), 404
+        c.execute("DELETE FROM sources WHERE id=%s", (sid,))
+        c.execute(
+            "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+            ("source_removed", "An RSS source was removed.", Jsonb({"source_name": row["name"]}))
+        )
     return jsonify({"ok": True})
 
 
 @bp.post("/api/admin/collect")
 @auth
 def collect_now():
-    return jsonify({"added": collect()})
-
+    return jsonify(collect())
 
 @bp.post("/api/admin/auto")
 @auth
