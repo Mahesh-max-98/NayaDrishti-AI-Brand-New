@@ -44,7 +44,7 @@ def conn():
 # RSS feeds are used where available. For outlets without a verified feed,
 # the collector reads the public homepage and extracts same-site article links.
 DEFAULT_SOURCES = [
-    ("RONB / Routine of Nepal Banda", "https://www.youtube.com/feeds/videos.xml?channel_id=UC2rariKHGBaLf0qmhWQv3KQ"),
+    ("RONB / Routine of Nepal Banda", "https://www.youtube.com/@RoutineofNepalBanda"),
     ("BBC Nepali", "https://www.bbc.com/nepali"),
     ("Onlinekhabar", "https://www.onlinekhabar.com/feed"),
     ("OK Khabar", "https://okkhabar.com/"),
@@ -56,8 +56,8 @@ DEFAULT_SOURCES = [
     ("Setopati", "https://www.setopati.com/feed"),
     ("Nagarik News", "https://nagariknews.nagariknetwork.com/feed"),
     ("Gorkhapatra", "https://gorkhapatraonline.com/rss"),
-    ("Ujyaalo Online", "https://ujyaaloonline.com/rss"),
-    ("Thaha Khabar", "https://thahakhabar.com/rss/"),
+    ("Ujyaalo Online", "https://www.ujyaaloonline.com/"),
+    ("Thaha Khabar", "https://www.thahakhabar.com/"),
     ("Nepal Samaya", "https://nepalsamaya.com/feed"),
     ("NEB Official Notices", "https://neb.gov.np/"),
     ("Ministry of Education, Science and Technology", "https://www.moest.gov.np/"),
@@ -79,12 +79,12 @@ def seed_default_sources():
         for name, keep_url, duplicate_urls in (
             ("Laliguras Media Network", "https://www.laligurash.com/", ["https://english.laligurash.com/"]),
             ("Nagarik News", "https://nagariknews.nagariknetwork.com/feed", ["https://nagariknews.nagariknetwork/feed", "https://nagariknews.nagariknetwork.com/", "https://nagariknews.nagariknetwork.com.com/feed"]),
-            ("RONB / Routine of Nepal Banda", "https://www.youtube.com/feeds/videos.xml?channel_id=UC2rariKHGBaLf0qmhWQv3KQ", ["https://ronbpost.com/", "https://www.ronbpost.com/"]),
+            ("RONB / Routine of Nepal Banda", "https://www.youtube.com/@RoutineofNepalBanda", ["https://www.youtube.com/feeds/videos.xml?channel_id=UC2rariKHGBaLf0qmhWQv3KQ", "https://ronbpost.com/", "https://www.ronbpost.com/"]),
             ("Khabarhub", "https://www.khabarhub.com/feed/", ["https://khabarhub.com/"]),
             ("Nepal Samaya", "https://nepalsamaya.com/feed", ["https://nepalsamaya.com/"]),
             ("NEB Official Notices", "https://neb.gov.np/", ["https://neb.gov.np/news-notices"]),
-            ("Thaha Khabar", "https://thahakhabar.com/rss/", ["https://thahakhabar.com/"]),
-            ("Ujyaalo Online", "https://ujyaaloonline.com/rss", ["https://www.ujyaaloonline.com/"]),
+            ("Thaha Khabar", "https://www.thahakhabar.com/", ["https://thahakhabar.com/rss/", "https://thahakhabar.com/"]),
+            ("Ujyaalo Online", "https://www.ujyaaloonline.com/", ["https://ujyaaloonline.com/rss", "https://www.ujyaaloonline.com/rss"]),
             ("Ministry of Education, Science and Technology", "https://www.moest.gov.np/", ["https://nepal.gov.np/"]),
             ("Curriculum Development Centre", "https://www.moecdc.gov.np/", ["https://techmandu.com/feed"]),
         ):
