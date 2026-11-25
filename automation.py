@@ -6,6 +6,9 @@ import urllib.request
 import urllib.error
 import re
 import logging
+import socket
+import ipaddress
+import html
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from functools import wraps
@@ -53,6 +56,8 @@ def init():
                 last_checked TIMESTAMPTZ,
                 last_success TIMESTAMPTZ,
                 last_error TEXT,
+                last_item_count INTEGER NOT NULL DEFAULT 0,
+                consecutive_failures INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
@@ -99,8 +104,11 @@ def init():
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
+        c.execute("ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_item_count INTEGER NOT NULL DEFAULT 0")
+        c.execute("ALTER TABLE sources ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0")
         c.execute("INSERT INTO settings(key, value) VALUES('auto', '0') ON CONFLICT(key) DO NOTHING")
         c.execute("INSERT INTO schema_migrations(version) VALUES(1) ON CONFLICT(version) DO NOTHING")
+        c.execute("INSERT INTO schema_migrations(version) VALUES(2) ON CONFLICT(version) DO NOTHING")
 
 
 def database_status():
