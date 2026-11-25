@@ -98,8 +98,9 @@ def home():
 
 @app.get("/assistant")
 def assistant():
-    # The assistant entry point belongs behind the admin login and dashboard.
-    return redirect("/admin")
+    # Always show the login screen when entering through the assistant URL.
+    # This makes the password prompt explicit even if an older session exists.
+    return redirect("/admin/login")
 
 @app.get("/health")
 def health():
