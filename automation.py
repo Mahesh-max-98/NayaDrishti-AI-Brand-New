@@ -761,6 +761,112 @@ def _plain_text(value):
     return re.sub(r"\s+", " ", html.unescape(value)).strip()
 
 
+class _ArticleMetadata(HTMLParser):
+    """Read publisher-provided descriptions and article text from an article page."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.meta_descriptions = []
+        self.jsonld_blocks = []
+        self._in_jsonld = False
+        self._jsonld_buffer = []
+
+    def handle_starttag(self, tag, attrs):
+        values = {str(k).lower(): (v or "") for k, v in attrs}
+        if tag.lower() == "meta":
+            key = (values.get("property") or values.get("name") or "").lower()
+            content = values.get("content", "").strip()
+            if content and key in ("description", "og:description", "twitter:description", "article:description"):
+                self.meta_descriptions.append(content)
+        elif tag.lower() == "script" and "ld+json" in values.get("type", "").lower():
+            self._in_jsonld = True
+            self._jsonld_buffer = []
+
+    def handle_data(self, data):
+        if self._in_jsonld:
+            self._jsonld_buffer.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "script" and self._in_jsonld:
+            self.jsonld_blocks.append("".join(self._jsonld_buffer))
+            self._jsonld_buffer = []
+            self._in_jsonld = False
+
+    def summary(self):
+        candidates = list(self.meta_descriptions)
+        def walk(value):
+            if isinstance(value, dict):
+                for key in ("description", "articleBody"):
+                    item = value.get(key)
+                    if isinstance(item, str) and len(item.strip()) >= 35:
+                        candidates.append(item)
+                for item in value.values():
+                    walk(item)
+            elif isinstance(value, list):
+                for item in value:
+                    walk(item)
+        for block in self.jsonld_blocks:
+            try:
+                walk(json.loads(block))
+            except (ValueError, TypeError):
+                continue
+        cleaned = []
+        for candidate in candidates:
+            value = _plain_text(candidate)
+            if len(value) >= 35:
+                cleaned.append(value)
+        if not cleaned:
+            return ""
+        # Prefer publisher-provided descriptions; use structured article text only
+        # when no usable description exists.
+        meta_cleaned = [_plain_text(x) for x in self.meta_descriptions]
+        meta_cleaned = [x for x in meta_cleaned if len(x) >= 35]
+        return max(meta_cleaned or cleaned, key=len)[:4000]
+
+
+def _entry_summary(entry):
+    """Use the richest summary text exposed by RSS/Atom, including content:encoded."""
+    candidates = []
+    for key in ("summary", "description"):
+        value = entry.get(key, "") if hasattr(entry, "get") else ""
+        if value:
+            candidates.append(value)
+    detail = entry.get("summary_detail", {}) if hasattr(entry, "get") else {}
+    if isinstance(detail, dict) and detail.get("value"):
+        candidates.append(detail["value"])
+    content = entry.get("content", []) if hasattr(entry, "get") else []
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get("value"):
+                candidates.append(item["value"])
+    cleaned = [_plain_text(value) for value in candidates]
+    cleaned = [value for value in cleaned if value]
+    return max(cleaned, key=len)[:4000] if cleaned else ""
+
+
+def _fetch_article_summary(url):
+    """Fetch only public article metadata; never execute page scripts or follow unsafe redirects."""
+    try:
+        _validate_feed_url(url)
+        opener = urllib.request.build_opener(_SafeFeedRedirect())
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; NayaDrishtiNewsCollector/1.0)",
+            "Accept": "text/html,application/xhtml+xml"
+        })
+        with opener.open(req, timeout=4) as response:
+            content_type = response.headers.get("Content-Type", "").lower()
+            if content_type and "html" not in content_type:
+                return ""
+            payload = response.read(1536 * 1024 + 1)
+            if len(payload) > 1536 * 1024:
+                return ""
+        parser = _ArticleMetadata()
+        parser.feed(payload.decode("utf-8", errors="replace"))
+        return parser.summary()
+    except Exception as exc:
+        logger.debug("Could not retrieve article summary from %s: %s", urllib.parse.urlsplit(url).hostname or "publisher", str(exc)[:120])
+        return ""
+
+
 def _research_category(title, summary=""):
     text_value = (str(title or "") + " " + str(summary or "")).lower()
     rules = [
@@ -829,7 +935,8 @@ def _research_metadata(source_names, published_at, created_at=None, summary=""):
     unique_sources = len(set(source_names or []))
     if unique_sources >= 2:
         flags.append("similar_headline_seen_in_multiple_sources")
-    if not str(summary or "").strip():
+    has_summary = len(str(summary or "").strip()) >= 35
+    if not has_summary:
         flags.append("headline_only_no_article_summary")
     # Breaking is only a candidate when several publishers and a reliable
     # publication timestamp are present; it always needs human verification.
@@ -839,7 +946,7 @@ def _research_metadata(source_names, published_at, created_at=None, summary=""):
     if unique_sources >= 2:
         evidence = "multiple_source_headline_match_only"
     else:
-        evidence = "single_source_with_summary" if str(summary or "").strip() else "headline_only_single_source"
+        evidence = "single_source_with_summary" if has_summary else "headline_only_single_source"
     return flags, evidence, breaking
 
 
@@ -907,24 +1014,34 @@ def _add_with_conn(c, title, summary, url, source, published_at=None):
         return "duplicate"
     category = _research_category(title, summary)
     existing = c.execute(
-        "SELECT id,sources,source_count,published_at,created FROM stories WHERE url=%s",
+        "SELECT id,sources,source_count,published_at,created,summary FROM stories WHERE url=%s",
         (url,)
     ).fetchone()
     if existing:
         names = list(existing["sources"] or [])
         if source not in names:
             names.append(source)
-            flags, evidence, breaking = _research_metadata(names, published_at or existing["published_at"], existing["created"], summary or existing.get("summary", ""))
+            merged_summary = existing.get("summary") or summary or ""
+            flags, evidence, breaking = _research_metadata(names, published_at or existing["published_at"], existing["created"], merged_summary)
             _record_story_source(c, existing["id"], source, title, summary, url, published_at)
             c.execute(
                 """UPDATE stories SET sources=%s,source_count=%s,
+                   summary=CASE WHEN COALESCE(summary,'')='' AND %s<>'' THEN %s ELSE summary END,
                    published_at=COALESCE(published_at,%s),research_flags=%s,
                    evidence_status=%s,is_breaking_candidate=%s,updated_at=NOW()
                    WHERE id=%s""",
-                (Jsonb(names), len(names), published_at, Jsonb(flags), evidence, breaking, existing["id"])
+                (Jsonb(names), len(names), (summary or "")[:4000], (summary or "")[:4000],
+                 published_at, Jsonb(flags), evidence, breaking, existing["id"])
             )
             return "matched"
         _record_story_source(c, existing["id"], source, title, summary, url, published_at)
+        if summary and not existing.get("summary"):
+            flags, evidence, breaking = _research_metadata(names, published_at or existing["published_at"], existing["created"], summary)
+            c.execute(
+                """UPDATE stories SET summary=%s,research_flags=%s,evidence_status=%s,
+                   is_breaking_candidate=%s,updated_at=NOW() WHERE id=%s""",
+                (summary[:4000], Jsonb(flags), evidence, breaking, existing["id"])
+            )
         return "duplicate"
 
     rows = c.execute(
@@ -1001,11 +1118,15 @@ def _collect_one(feed):
         parsed = _fetch_feed(feed["url"])
         entries = parsed.entries[:25]
         result["items_seen"] = len(entries)
+        enrichment_attempts = 0
         with conn() as c:
             for entry in entries:
                 title = _plain_text(entry.get("title", "") if isinstance(entry, dict) else getattr(entry, "title", ""))
                 link = str(entry.get("link", "") if isinstance(entry, dict) else (getattr(entry, "link", "") or "")).strip()
-                summary = _plain_text(entry.get("summary", "") if isinstance(entry, dict) else (getattr(entry, "summary", "") or getattr(entry, "description", "")))
+                summary = _entry_summary(entry) if hasattr(entry, "get") else _plain_text(getattr(entry, "summary", "") or getattr(entry, "description", ""))
+                if len(summary) < 35 and enrichment_attempts < 8 and link.startswith(("https://", "http://")):
+                    enrichment_attempts += 1
+                    summary = _fetch_article_summary(link) or summary
                 published_at = _published_datetime(entry)
                 if not title or not link.startswith(("https://", "http://")):
                     result["duplicates"] += 1
