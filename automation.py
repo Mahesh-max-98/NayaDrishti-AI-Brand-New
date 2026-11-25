@@ -491,8 +491,8 @@ def _research_category(title, summary=""):
 
 def _normalized_title(value):
     value = str(value or "").lower()
-    value = re.sub(r"[^\\w\\u0900-\\u097f]+", " ", value, flags=re.UNICODE)
-    return re.sub(r"\\s+", " ", value).strip()
+    value = re.sub(r"[^\w\u0900-\u097f]+", " ", value, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", value).strip()
 
 
 def _title_similarity(left, right):
@@ -525,7 +525,6 @@ def _published_datetime(entry):
 
 def _research_metadata(source_names, published_at, created_at=None):
     now = datetime.now(timezone.utc)
-    reference = published_at or created_at
     flags = []
     if published_at is None:
         flags.append("publication_time_unknown")
@@ -534,10 +533,11 @@ def _research_metadata(source_names, published_at, created_at=None):
     unique_sources = len(set(source_names or []))
     if unique_sources >= 2:
         flags.append("similar_headline_seen_in_multiple_sources")
-    if unique_sources >= 3 and reference and (now - reference).total_seconds() <= 6 * 3600:
+    # Never infer breaking status from collection time when publication time is unknown.
+    if unique_sources >= 3 and published_at and (now - published_at).total_seconds() <= 6 * 3600:
         flags.append("breaking_candidate_requires_editorial_verification")
     evidence = "multiple_source_headline_match_only" if unique_sources >= 2 else "single_source"
-    breaking = unique_sources >= 3 and reference is not None and (now - reference).total_seconds() <= 6 * 3600
+    breaking = unique_sources >= 3 and published_at is not None and (now - published_at).total_seconds() <= 6 * 3600
     return flags, evidence, breaking
 
 
@@ -767,7 +767,7 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 async function api(path,method='GET',body){const r=await fetch(path,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d}
 async function load(){try{const d=await api('/api/admin/status');$('total').textContent=d.summary.total_sources;$('enabled').textContent=d.summary.enabled_sources;$('healthy').textContent=d.summary.healthy_sources;$('storiesCount').textContent=d.summary.stories;
 $('feeds').innerHTML=d.sources.map(s=>'<div class=feed><div><strong>'+esc(s.name)+'</strong> '+(s.enabled?'<span class="pill ok">Enabled</span>':'<span class=pill>Disabled</span>')+' '+(s.last_error?'<span class="pill bad">Error</span>':s.last_success?'<span class="pill ok">Healthy</span>':'<span class="pill warn">Not checked</span>')+'<small>'+esc(s.url)+'</small><small>Last checked: '+esc(s.last_checked||'Never')+' · Items: '+s.last_item_count+' · Failed runs: '+s.consecutive_failures+'</small>'+(s.last_error?'<small class=bad>'+esc(s.last_error)+'</small>':'')+'</div><div class=feed-actions><button class=secondary data-action=toggle data-id='+s.id+' data-enabled='+(s.enabled?'false':'true')+'>'+(s.enabled?'Disable':'Enable')+'</button><button class=secondary data-action=edit data-id='+s.id+' data-name="'+esc(s.name)+'" data-url="'+esc(s.url)+'">Edit</button><button class=danger data-action=delete data-id='+s.id+'>Remove</button></div></div>').join('')||'<p class=muted>No sources yet. Add your first RSS feed above.</p>';
-$('stories').innerHTML=d.stories.map(s=>'<div class=story><h3>'+esc(s.title)+'</h3><p class=muted>'+esc(s.source_name)+' · '+s.source_count+' source match(es) · '+esc(s.status)+'</p><p>'+esc(s.summary||'No summary provided by feed.')+'</p><a href="'+esc(s.url)+'" target=_blank rel=noopener>Open original article</a></div>').join('')||'<p class=muted>No stories collected yet.</p>';
+$('stories').innerHTML=d.stories.map(s=>'<div class=story><h3>'+esc(s.title)+'</h3><p class=muted>'+esc(s.category||'Other')+' · '+esc(s.source_name)+' · '+s.source_count+' source match(es) · '+esc(s.status)+'</p><p>'+esc(s.summary||'No summary provided by feed.')+'</p><p class=muted>'+esc((s.research_flags||[]).join(' · '))+' · Evidence: '+esc(s.evidence_status||'single_source')+(s.is_breaking_candidate?' · BREAKING CANDIDATE — verify before use':'')+'</p><a href="'+esc(s.url)+'" target=_blank rel=noopener>Open original article</a></div>').join('')||'<p class=muted>No stories collected yet.</p>';
 }catch(e){$('message').textContent=e.message}}
 $('addForm').addEventListener('submit',async e=>{e.preventDefault();$('addBtn').disabled=true;try{await api('/api/admin/sources','POST',{name:$('sourceName').value,url:$('sourceUrl').value});$('message').textContent='Source added.';$('sourceName').value='';$('sourceUrl').value='';await load()}catch(err){$('message').textContent=err.message}finally{$('addBtn').disabled=false}});
 $('feeds').addEventListener('click',async e=>{const b=e.target.closest('button[data-action]');if(!b)return;const id=b.dataset.id;try{if(b.dataset.action==='toggle'){await api('/api/admin/sources/'+id,'PATCH',{enabled:b.dataset.enabled==='true'})}else if(b.dataset.action==='edit'){const name=prompt('Source name:',b.dataset.name);if(name===null)return;const url=prompt('RSS / Atom feed URL:',b.dataset.url);if(url===null)return;await api('/api/admin/sources/'+id,'PATCH',{name,url})}else if(b.dataset.action==='delete'){if(!confirm('Remove this source? Previously collected stories will remain.'))return;await api('/api/admin/sources/'+id,'DELETE')}await load()}catch(err){alert(err.message)}});
