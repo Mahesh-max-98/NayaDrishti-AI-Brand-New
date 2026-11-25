@@ -44,16 +44,16 @@ h1{margin:24px 0 18px;font-size:clamp(42px,7vw,76px);line-height:1.04;letter-spa
 .note{text-align:center;color:#8294ad;font-size:12px;margin:25px auto 0}footer{border-top:1px solid #9aabc226;padding:22px 0;color:#8294ad;font-size:12px}footer .wrap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 @media(max-width:700px){main{padding-top:54px}.features{grid-template-columns:1fr}h1{letter-spacing:-2px}.intro{font-size:15px}header{height:68px}}
 </style></head><body><div class="wrap">
-<header><a class="brand" href="/" style="color:inherit;text-decoration:none"><span class="mark">N</span><span>NayaDrishti AI<small>NEWS • INSIGHT • PERSPECTIVE</small></span></a><span class="status">● Foundation online</span></header>
+<header><a class="brand" href="/" style="color:inherit;text-decoration:none"><span class="mark">N</span><span>NayaDrishti AI<small>NEWS • INSIGHT • PERSPECTIVE</small></span></a><span class="status">● Newsroom online · Phase 3</span></header>
 <main><section class="hero"><div class="eyebrow"><span class="dot"></span> A fresh perspective on Nepali news</div>
 <h1>Clear news.<br><span>Clear perspective.</span></h1>
 <p class="intro">A smarter space to collect, understand and review news from Nepal. Built to make useful information easier to follow — with clarity, context and responsibility.</p>
 <div class="actions"><a class="btn primary" href="#features">Explore the platform →</a><a class="btn" href="/health">System status</a></div></section>
 <section id="features"><div class="section-label">The platform we're building</div><div class="features">
-<a class="feature" href="/assistant"><div class="ico">◈</div><h2>News discovery</h2><p>Open the AI assistant to explore topics and understand news in Nepali.</p></a>
-<a class="feature" href="/assistant"><div class="ico">✧</div><h2>AI assistance</h2><p>Ask questions and get helpful explanations in Nepali.</p></a>
+<a class="feature" href="/admin/login"><div class="ico">◈</div><h2>News source manager</h2><p>Manage RSS feeds, collect headlines and monitor publisher availability.</p></a>
+<a class="feature" href="/admin/login"><div class="ico">✧</div><h2>Collected news</h2><p>Review collected stories and open original articles for verification.</p></a>
 <div class="feature"><div class="ico">✓</div><h2>Editorial review</h2><p>Editorial review tools are planned for a later stage.</p></div>
-</div><p class="note">Stage 2 introduces the AI assistant. News feeds and editorial tools will follow in later stages.</p></section></main>
+</div><p class="note">Phase 3 includes RSS source management and manual news collection. Research, AI writing and editorial approval will follow in later phases.</p></section></main>
 <footer><div class="wrap"><span>© 2026 NayaDrishti AI</span><span>Built for clarity. Designed for Nepal.</span></div></footer>
 </div></body></html>"""
 
