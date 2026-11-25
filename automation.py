@@ -143,6 +143,21 @@ def init():
             )
         """)
         c.execute("""
+            CREATE TABLE IF NOT EXISTS story_sources (
+                id BIGSERIAL PRIMARY KEY,
+                story_id BIGINT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+                source_name TEXT NOT NULL,
+                article_url TEXT NOT NULL,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                published_at TIMESTAMPTZ,
+                collected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(story_id, article_url)
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_story_sources_story ON story_sources(story_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_story_sources_publisher ON story_sources(source_name)")
+        c.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -180,6 +195,7 @@ def init():
         c.execute("INSERT INTO schema_migrations(version) VALUES(1) ON CONFLICT(version) DO NOTHING")
         c.execute("INSERT INTO schema_migrations(version) VALUES(2) ON CONFLICT(version) DO NOTHING")
         c.execute("INSERT INTO schema_migrations(version) VALUES(3) ON CONFLICT(version) DO NOTHING")
+        c.execute("INSERT INTO schema_migrations(version) VALUES(4) ON CONFLICT(version) DO NOTHING")
 
 
 def database_status():
@@ -196,6 +212,7 @@ def database_status():
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=1) AS migration_applied,
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=2) AS source_migration_ready,
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=3) AS research_migration_ready,
+                       EXISTS(SELECT 1 FROM schema_migrations WHERE version=4) AS provenance_migration_ready,
                        (SELECT COUNT(*) FROM information_schema.columns
                         WHERE table_schema='public' AND table_name='sources'
                         AND column_name IN ('last_item_count','consecutive_failures'))=2 AS source_health_fields_ready,
@@ -205,7 +222,7 @@ def database_status():
             ready = all(row[k] for k in (
                 "migrations_ready", "sources_ready", "stories_ready",
                 "settings_ready", "revisions_ready", "logs_ready",
-                "migration_applied", "source_migration_ready", "research_migration_ready",
+                "migration_applied", "source_migration_ready", "research_migration_ready", "provenance_migration_ready",
                 "source_health_fields_ready", "default_settings_ready"
             ))
             if not ready:
@@ -523,7 +540,7 @@ def _published_datetime(entry):
     return None
 
 
-def _research_metadata(source_names, published_at, created_at=None):
+def _research_metadata(source_names, published_at, created_at=None, summary=""):
     now = datetime.now(timezone.utc)
     flags = []
     if published_at is None:
@@ -533,18 +550,42 @@ def _research_metadata(source_names, published_at, created_at=None):
     unique_sources = len(set(source_names or []))
     if unique_sources >= 2:
         flags.append("similar_headline_seen_in_multiple_sources")
-    # Never infer breaking status from collection time when publication time is unknown.
-    if unique_sources >= 3 and published_at and (now - published_at).total_seconds() <= 6 * 3600:
+    if not str(summary or "").strip():
+        flags.append("headline_only_no_article_summary")
+    # Breaking is only a candidate when several publishers and a reliable
+    # publication timestamp are present; it always needs human verification.
+    breaking = unique_sources >= 3 and published_at is not None and 0 <= (now - published_at).total_seconds() <= 6 * 3600
+    if breaking:
         flags.append("breaking_candidate_requires_editorial_verification")
-    evidence = "multiple_source_headline_match_only" if unique_sources >= 2 else "single_source"
-    breaking = unique_sources >= 3 and published_at is not None and (now - published_at).total_seconds() <= 6 * 3600
+    if unique_sources >= 2:
+        evidence = "multiple_source_headline_match_only"
+    else:
+        evidence = "single_source_with_summary" if str(summary or "").strip() else "headline_only_single_source"
     return flags, evidence, breaking
+
+
+def _record_story_source(c, story_id, source, title, summary, url, published_at):
+    c.execute(
+        """INSERT INTO story_sources(story_id,source_name,article_url,title,summary,published_at)
+           VALUES(%s,%s,%s,%s,%s,%s)
+           ON CONFLICT(story_id,article_url) DO UPDATE SET
+             source_name=EXCLUDED.source_name,
+             title=EXCLUDED.title,
+             summary=EXCLUDED.summary,
+             published_at=COALESCE(story_sources.published_at,EXCLUDED.published_at)""",
+        (story_id, source, url, title[:400], (summary or "")[:4000], published_at)
+    )
 
 
 def _backfill_research_fields():
     # One set-based UPDATE avoids hundreds of round trips to the remote database
     # during startup and keeps the web service responsive.
     with conn() as c:
+        c.execute("""
+            INSERT INTO story_sources(story_id,source_name,article_url,title,summary,published_at)
+            SELECT id,source_name,url,title,summary,published_at FROM stories
+            ON CONFLICT(story_id,article_url) DO NOTHING
+        """)
         c.execute("""
             UPDATE stories
             SET category = CASE
@@ -562,11 +603,14 @@ def _backfill_research_fields():
                 ELSE 'Other'
             END,
             research_flags =
+                (CASE WHEN COALESCE(summary,'')='' THEN jsonb_build_array('headline_only_no_article_summary') ELSE '[]'::jsonb END) ||
                 (CASE WHEN published_at IS NULL THEN jsonb_build_array('publication_time_unknown') ELSE '[]'::jsonb END) ||
                 (CASE WHEN published_at < NOW() - INTERVAL '48 hours' THEN jsonb_build_array('possibly_old_news') ELSE '[]'::jsonb END) ||
                 (CASE WHEN source_count >= 2 THEN jsonb_build_array('similar_headline_seen_in_multiple_sources') ELSE '[]'::jsonb END) ||
                 (CASE WHEN source_count >= 3 AND published_at >= NOW() - INTERVAL '6 hours' THEN jsonb_build_array('breaking_candidate_requires_editorial_verification') ELSE '[]'::jsonb END),
-            evidence_status = CASE WHEN source_count >= 2 THEN 'multiple_source_headline_match_only' ELSE 'single_source' END,
+            evidence_status = CASE WHEN source_count >= 2 THEN 'multiple_source_headline_match_only'
+                                   WHEN COALESCE(summary,'')='' THEN 'headline_only_single_source'
+                                   ELSE 'single_source_with_summary' END,
             is_breaking_candidate = (source_count >= 3 AND published_at >= NOW() - INTERVAL '6 hours'),
             duplicate_group_key = md5(lower(title))
             WHERE category = 'Uncategorized' OR duplicate_group_key IS NULL
@@ -585,7 +629,8 @@ def add(title, summary, url, source, published_at=None):
             names = list(existing["sources"] or [])
             if source not in names:
                 names.append(source)
-                flags, evidence, breaking = _research_metadata(names, published_at or existing["published_at"], existing["created"])
+                flags, evidence, breaking = _research_metadata(names, published_at or existing["published_at"], existing["created"], summary or existing.get("summary", ""))
+                _record_story_source(c, existing["id"], source, title, summary, url, published_at)
                 c.execute(
                     """UPDATE stories SET sources=%s,source_count=%s,
                        published_at=COALESCE(published_at,%s),research_flags=%s,
@@ -594,6 +639,7 @@ def add(title, summary, url, source, published_at=None):
                     (Jsonb(names), len(names), published_at, Jsonb(flags), evidence, breaking, existing["id"])
                 )
                 return "matched"
+            _record_story_source(c, existing["id"], source, title, summary, url, published_at)
             return "duplicate"
 
         rows = c.execute(
@@ -613,7 +659,8 @@ def add(title, summary, url, source, published_at=None):
             names = list(match["sources"] or [])
             if source not in names:
                 names.append(source)
-            flags, evidence, breaking = _research_metadata(names, match["published_at"] or published_at, match["created"])
+            flags, evidence, breaking = _research_metadata(names, match["published_at"] or published_at, match["created"], match["summary"] or summary)
+            _record_story_source(c, match["id"], source, title, summary, url, published_at)
             c.execute(
                 """UPDATE stories SET sources=%s,source_count=%s,
                    summary=CASE WHEN summary='' AND %s<>'' THEN %s ELSE summary END,
@@ -626,7 +673,7 @@ def add(title, summary, url, source, published_at=None):
             return "matched"
 
         names = [source]
-        flags, evidence, breaking = _research_metadata(names, published_at)
+        flags, evidence, breaking = _research_metadata(names, published_at, summary=summary)
         group_key = hashlib.sha256(_normalized_title(title).encode("utf-8")).hexdigest()[:20]
         row = c.execute(
             """INSERT INTO stories(
@@ -638,6 +685,7 @@ def add(title, summary, url, source, published_at=None):
              published_at, Jsonb(flags), evidence, breaking, group_key)
         ).fetchone()
         sid = row["id"]
+        _record_story_source(c, sid, source, title, summary, url, published_at)
         c.execute(
             "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
             ("story_collected", "A story was collected and classified for editorial research.", Jsonb({
