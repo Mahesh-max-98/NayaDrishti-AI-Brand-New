@@ -1284,7 +1284,7 @@ PANEL = """<!doctype html><meta name=viewport content='width=device-width,initia
 <div class=card><h2>Automatic source setup</h2><p class=muted>NayaDrishti preloads available public Nepali news RSS feeds. You do not need to enter feed links. You can still add or manage sources below if needed.</p><form id=addForm><input id=sourceName placeholder='Source name' required maxlength=100><input id=sourceUrl placeholder='https://example.com/feed' required style='width:min(560px,95%)'><button id=addBtn>Add source</button></form><p id=message class=muted aria-live=polite></p></div>
 <div class=card><div class=top><div><h2>News sources</h2><p class=muted>Enable, edit, check health or remove a source.</p></div><button id=collectBtn>Collect news now</button></div><div id=feeds>Loading sources…</div></div>
 <div class=card><div class=top><div><h2>Research & editorial signals</h2><p class=muted>Headline matches are not fact-checks. Verify claims against original reporting.</p></div><select id=categoryFilter aria-label="Filter stories by category"><option value="">All categories</option></select></div><div class=grid><div class=stat><strong id=multiMatches>—</strong><span>Multi-source headline matches</span></div><div class=stat><strong id=oldStories>—</strong><span>Possibly old stories</span></div><div class=stat><strong id=breakingCandidates>—</strong><span>Breaking candidates · verify</span></div><div class=stat><strong id=headlineOnly>—</strong><span>Headline-only records</span></div></div></div>
-<div class=card><h2>Nepali AI writing engine</h2><p class=muted>The Gemini Nepali writing engine is configured separately. Existing drafts can be edited, reviewed and managed below; approval never publishes to Facebook.</p><div id=aiStatus class=ai-note>Checking Gemini configuration…</div></div>
+<div class=card><h2>Nepali AI writing engine</h2><p class=muted>The Gemini Nepali writing engine is configured separately. Test its connection without generating a draft. Approval never publishes to Facebook.</p><div id=aiStatus class=ai-note>Checking Gemini configuration…</div><div class=toolbar><button class=secondary id=testGeminiConnection>Test Gemini connection</button></div><p id=geminiTestMessage class=muted role=status aria-live=polite></p></div>
 <div id=message class=muted role=status aria-live=polite style="min-height:1.5em;margin:12px 0;color:#ffcc80"></div>
 <div class=card><div class=top><div><h2>Editorial desk & draft management</h2><p class=muted>Edit, review, approve or dismiss drafts. Approval never publishes to Facebook.</p></div><button class=secondary id=exportDrafts>Export pending drafts CSV</button></div><div class=toolbar><input id=storySearch placeholder='Search headlines or sources'><select id=statusFilter><option value='all'>All statuses</option><option value='draft'>Pending review</option><option value='approved'>Approved</option><option value='dismissed'>Dismissed</option><option value='no_draft'>No draft</option></select><select id=editorCategory><option value=''>All categories</option></select><button class=secondary id=selectVisible>Select visible</button><button class=danger id=bulkDismiss>Dismiss selected</button></div><p id=editorMessage class=muted role=status aria-live=polite></p><div id=stories>Loading…</div></div>
 <script>
@@ -1331,6 +1331,7 @@ else if(action==='restore'){if(!confirm('Restore version '+b.dataset.version+'? 
 $('addForm').addEventListener('submit',async e=>{e.preventDefault();$('addBtn').disabled=true;try{await api('/api/admin/sources','POST',{name:$('sourceName').value,url:$('sourceUrl').value});$('message').textContent='Source added.';$('sourceName').value='';$('sourceUrl').value='';await load()}catch(err){$('message').textContent=err.message}finally{$('addBtn').disabled=false}});
 $('feeds').addEventListener('click',async e=>{const b=e.target.closest('button[data-action]');if(!b)return;const id=b.dataset.id;try{if(b.dataset.action==='toggle'){await api('/api/admin/sources/'+id,'PATCH',{enabled:b.dataset.enabled==='true'})}else if(b.dataset.action==='edit'){const name=prompt('Source name:',b.dataset.name);if(name===null)return;const url=prompt('RSS / Atom feed URL:',b.dataset.url);if(url===null)return;await api('/api/admin/sources/'+id,'PATCH',{name,url})}else if(b.dataset.action==='delete'){if(!confirm('Remove this source? Previously collected stories will remain.'))return;await api('/api/admin/sources/'+id,'DELETE')}await load()}catch(err){alert(err.message)}});
 $('testFacebookConnection').addEventListener('click',async()=>{const b=$('testFacebookConnection');b.disabled=true;b.textContent='Testing…';$('facebookConnectionMessage').textContent='Checking the configured Facebook Page using a read-only request…';try{const result=await api('/api/admin/facebook/test','POST',{});$('facebookConnectionMessage').textContent='Connected successfully to '+result.page_name+' (Page ID '+result.page_id+'). This was a read-only test; nothing was published.';await load()}catch(e){$('facebookConnectionMessage').textContent=e.message}finally{b.disabled=false;b.textContent='Test read-only connection';}});
+$('testGeminiConnection').addEventListener('click',async()=>{const b=$('testGeminiConnection'),m=$('geminiTestMessage');b.disabled=true;b.textContent='Testing…';m.textContent='Sending a small test request to Gemini. No news draft will be created.';try{const result=await api('/api/admin/ai/test','POST',{});m.textContent=result.message+' Model: '+result.model+'.'}catch(e){m.textContent=e.message}finally{b.disabled=false;b.textContent='Test Gemini connection';}});
 $('collectBtn').addEventListener('click',async()=>{const b=$('collectBtn');b.disabled=true;b.textContent='Collecting…';$('message').textContent='Checking enabled RSS feeds…';try{const d=await api('/api/admin/collect','POST',{});$('message').textContent='Checked '+d.checked+' source(s): '+d.new+' new stories, '+d.matched+' similar-story matches, '+d.duplicates+' duplicates, '+d.failed+' failures.';await load();if(d.failed)alert('Some sources failed. Their error details are shown in Source Health.')}catch(e){$('message').textContent=e.message}finally{b.disabled=false;b.textContent='Collect news now'}});
 load();
 setInterval(load, 60000);
@@ -1721,6 +1722,56 @@ def export_pending_drafts():
         writer.writerow([row["id"],row["title"],row["category"],row["source_name"],row["status"],row["draft"],row["url"]])
     from flask import Response
     return Response("\ufeff"+output.getvalue(),mimetype="text/csv; charset=utf-8",headers={"Content-Disposition":"attachment; filename=nayadrishti-pending-drafts.csv"})
+
+@bp.post("/api/admin/ai/test")
+@auth
+def test_gemini_connection():
+    """Check Gemini connectivity without generating or saving a news draft."""
+    key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not key:
+        return jsonify({"ok": False, "error": "Gemini API key is not configured in Render."}), 503
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", model):
+        return jsonify({"ok": False, "error": "The configured Gemini model name is invalid."}), 503
+    body = {
+        "contents": [{"role": "user", "parts": [{"text": "Reply with exactly the word OK."}]}],
+        "generationConfig": {"temperature": 0, "maxOutputTokens": 8}
+    }
+    req = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-goog-api-key": key},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        candidates = result.get("candidates", [])
+        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+        if not any(isinstance(part, dict) and str(part.get("text", "")).strip() for part in parts):
+            return jsonify({"ok": False, "error": "Gemini responded, but returned no text."}), 502
+        with conn() as c:
+            c.execute(
+                "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+                ("gemini_connection_test", "Gemini connection test succeeded; no news draft was generated.", Jsonb({"model": model}))
+            )
+        return jsonify({"ok": True, "model": model, "message": "Gemini responded successfully. No news draft was generated."})
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            message = "Gemini quota or rate limit reached. No draft was generated."
+            status = 429
+        elif exc.code in (400, 401, 403, 404):
+            message = f"Gemini rejected the test request (HTTP {exc.code}). Check the model and API access in Render."
+            status = 502
+        else:
+            message = f"Gemini is temporarily unavailable (HTTP {exc.code})."
+            status = 502
+        return jsonify({"ok": False, "error": message}), status
+    except (urllib.error.URLError, TimeoutError):
+        return jsonify({"ok": False, "error": "Could not reach Gemini. Please try again later."}), 502
+    except (ValueError, TypeError, KeyError, IndexError):
+        return jsonify({"ok": False, "error": "Gemini returned an unreadable response."}), 502
+
 
 @bp.post("/api/admin/stories/<int:sid>/generate-draft")
 @auth
