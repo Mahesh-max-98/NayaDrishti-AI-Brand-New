@@ -1426,7 +1426,7 @@ if(action==='generate'){if(!confirm('Generate and save one Nepali draft for edit
 if(action==='edit-draft'){$('editor-'+id).classList.remove('hidden');$('text-'+id).focus()}
 else if(action==='cancel'){$('editor-'+id).classList.add('hidden')}
 else if(action==='save'){await api('/api/admin/stories/'+id+'/draft','PATCH',{draft:$('text-'+id).value});msg.textContent='Draft saved. A previous version was retained.';await load()}
-else if(action==='approve'){if(!confirm('Approve this draft for editorial use? Approval does not publish it.'))return;await api('/api/admin/stories/'+id+'/approve','POST',{});msg.textContent='Draft approved. It has not been published.';await load()}
+else if(action==='approve'){const evidence=story.evidence_status||'single_source';const warning=evidence==='multiple_source_headline_match_only'?'\\n\\nSeveral sources have similar headlines, but this is NOT fact-checking. Compare the original reports.':evidence==='single_source_with_summary'?'\\n\\nThis story has one source. Check names, dates, figures and claims against the original report.':'\\n\\nVerify every detail against the original report.';if(!confirm('Before approval, open and review the original report. Check names, dates, numbers and claims.'+warning+'\\n\\nConfirm that you reviewed the original report? Approval does NOT publish to Facebook.'))return;await api('/api/admin/stories/'+id+'/approve','POST',{source_reviewed:true});msg.textContent='Draft approved after source-review confirmation. It has not been published.';await load()}
 else if(action==='publish'){if(!facebookManualEnabled){msg.textContent='Manual Facebook publishing is OFF. No post was sent.';return}if(!confirm('Publish this approved Nepali draft to the connected Facebook Page now?\\n\\n'+story.draft+'\\n\\nThis action sends a real Facebook post and cannot be undone from NayaDrishti.'))return;await api('/api/admin/publish/'+id,'POST',{confirm:true});msg.textContent='Facebook confirmed the post. Publishing history has been updated.';await load()}
 else if(action==='dismiss'){if(!confirm('Dismiss this story?'))return;await api('/api/admin/stories/'+id+'/dismiss','POST',{});msg.textContent='Story dismissed.';await load()}
 else if(action==='history'){const data=await api('/api/admin/stories/'+id+'/revisions');$('history-'+id).innerHTML=data.revisions.map(v=>'<div class=revision><strong>Version '+v.version+'</strong> · '+esc(v.created_at)+'<pre class=draft-preview>'+esc(v.content)+'</pre><button class=secondary data-action="restore='+id+'" data-version="'+v.version+'">Restore this version</button></div>').join('')||'<p class=muted>No previous versions.</p>'}
@@ -1753,13 +1753,41 @@ def update_story_draft(sid):
 @bp.post("/api/admin/stories/<int:sid>/approve")
 @auth
 def approve_story_draft(sid):
+    data = request.get_json(silent=True) or {}
+    if data.get("source_reviewed") is not True:
+        return jsonify({"error":"Review the original report and explicitly confirm before approval."}),400
     with conn() as c:
-        row=c.execute("SELECT draft,status FROM stories WHERE id=%s FOR UPDATE",(sid,)).fetchone()
+        row=c.execute(
+            "SELECT title,summary,url,draft,status,evidence_status FROM stories WHERE id=%s FOR UPDATE",
+            (sid,)
+        ).fetchone()
         if not row: return jsonify({"error":"Story not found."}),404
-        if not row["draft"].strip(): return jsonify({"error":"A saved draft is required before approval."}),400
         if row["status"]=="dismissed": return jsonify({"error":"Restore this dismissed story before approving it."}),409
-        c.execute("UPDATE stories SET status='approved',updated_at=NOW() WHERE id=%s",(sid,))
-        c.execute("INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",("draft_approved","A news draft was approved for editorial use; it was not published.",Jsonb({"story_id":sid})))
+        summary = str(row["summary"] or "").strip()
+        evidence = str(row["evidence_status"] or "")
+        if evidence.startswith("headline_only") or len(summary) < 35:
+            return jsonify({"error":"This story has no usable article summary. A headline alone cannot be approved as a full news post."}),400
+        if not str(row["url"] or "").startswith(("http://","https://")):
+            return jsonify({"error":"The original report link is missing. Verify the source before approval."}),400
+        content = _remove_comment_on_heading(row["draft"])
+        if len(content) < 90 or not re.search(r"[\\u0900-\\u097F]", content):
+            return jsonify({"error":"The draft is too short or is not in Nepali. Edit it into a complete, meaningful post before approval."}),400
+        if len(re.findall(r"[।!?]", content)) < 1:
+            return jsonify({"error":"The draft needs a complete sentence before approval."}),400
+        def _approval_key(value):
+            return re.sub(r"[\\W_]+", "", str(value or "").lower(), flags=re.UNICODE)
+        title_key = _approval_key(row["title"])
+        draft_key = _approval_key(content)
+        if title_key and draft_key and SequenceMatcher(None, title_key, draft_key[:len(title_key)*2]).ratio() >= 0.92:
+            return jsonify({"error":"The draft mostly repeats the headline. Add useful details from the source report before approval."}),400
+        c.execute(
+            "UPDATE stories SET draft=%s,status='approved',updated_at=NOW() WHERE id=%s",
+            (content,sid)
+        )
+        c.execute(
+            "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+            ("draft_approved","An editor reviewed the original report and approved a complete news draft; it was not published.",Jsonb({"story_id":sid,"evidence_status":evidence}))
+        )
     return jsonify({"ok":True,"published":False})
 
 @bp.post("/api/admin/stories/<int:sid>/dismiss")
