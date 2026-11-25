@@ -823,15 +823,31 @@ PANEL = """<!doctype html><meta name=viewport content='width=device-width,initia
 <div class=grid><div class=stat><strong id=total>—</strong><span>Total sources</span></div><div class=stat><strong id=enabled>—</strong><span>Enabled sources</span></div><div class=stat><strong id=healthy>—</strong><span>Healthy sources</span></div><div class=stat><strong id=storiesCount>—</strong><span>Collected stories</span></div></div>
 <div class=card><h2>Automatic source setup</h2><p class=muted>NayaDrishti preloads available public Nepali news RSS feeds. You do not need to enter feed links. You can still add or manage sources below if needed.</p><form id=addForm><input id=sourceName placeholder='Source name' required maxlength=100><input id=sourceUrl placeholder='https://example.com/feed' required style='width:min(560px,95%)'><button id=addBtn>Add source</button></form><p id=message class=muted aria-live=polite></p></div>
 <div class=card><div class=top><div><h2>News sources</h2><p class=muted>Enable, edit, check health or remove a source.</p></div><button id=collectBtn>Collect news now</button></div><div id=feeds>Loading sources…</div></div>
-<div class=card><h2>Latest collected stories</h2><p class=muted>Original article links are kept for editorial verification. Stories are not published to Facebook.</p><div id=stories>Loading…</div></div>
+<div class=card><div class=top><div><h2>Research & editorial signals</h2><p class=muted>Headline matches are not fact-checks. Verify claims against original reporting.</p></div><select id=categoryFilter aria-label="Filter stories by category"><option value="">All categories</option></select></div><div class=grid><div class=stat><strong id=multiMatches>—</strong><span>Multi-source headline matches</span></div><div class=stat><strong id=oldStories>—</strong><span>Possibly old stories</span></div><div class=stat><strong id=breakingCandidates>—</strong><span>Breaking candidates · verify</span></div><div class=stat><strong id=headlineOnly>—</strong><span>Headline-only records</span></div></div></div>
+<div class=card><h2>Latest collected stories</h2><p class=muted>Publisher links and research provenance are kept here for editorial verification. Nothing is published to Facebook automatically.</p><div id=stories>Loading…</div></div>
 <script>
 const $=id=>document.getElementById(id);
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function api(path,method='GET',body){const r=await fetch(path,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d}
+let allStories=[];
+function renderStories(){
+const selected=$('categoryFilter').value;
+const visible=allStories.filter(s=>!selected||s.category===selected);
+$('stories').innerHTML=visible.map(s=>'<div class=story><h3>'+esc(s.title)+'</h3><p class=muted>'+esc(s.category||'Other')+' · '+esc(s.source_name)+' · '+s.source_count+' source match(es) · '+esc(s.status)+'</p><p>'+esc(s.summary||'No article summary supplied by publisher.')+'</p><p class=muted>Evidence: '+esc(s.evidence_status||'single_source')+' · '+esc((s.research_flags||[]).join(' · '))+(s.is_breaking_candidate?' · BREAKING CANDIDATE — editorial verification required':'')+'</p><p class=muted>Publication: '+esc(s.published_at||'Unknown')+' · Group: '+esc(s.duplicate_group_key||'Not assigned')+'</p><div>'+((s.provenance||[]).map(p=>'<p><a href="'+esc(p.article_url)+'" target=_blank rel=noopener>'+esc(p.source_name)+' — original report</a></p>').join(''))+'</div></div>').join('')||'<p class=muted>No stories match this category.</p>';
+}
 async function load(){try{const d=await api('/api/admin/status');$('total').textContent=d.summary.total_sources;$('enabled').textContent=d.summary.enabled_sources;$('healthy').textContent=d.summary.healthy_sources;$('storiesCount').textContent=d.summary.stories;
+$('multiMatches').textContent=d.summary.research.multi_source_matches;
+$('oldStories').textContent=d.summary.research.possibly_old;
+$('breakingCandidates').textContent=d.summary.research.breaking_candidates;
+$('headlineOnly').textContent=d.summary.research.headline_only;
+const prior=$('categoryFilter').value;
+$('categoryFilter').innerHTML='<option value="">All categories</option>'+d.categories.map(c=>'<option value="'+esc(c.category)+'">'+esc(c.category)+' ('+c.count+')</option>').join('');
+$('categoryFilter').value=prior;
+allStories=d.stories;renderStories();
 $('feeds').innerHTML=d.sources.map(s=>'<div class=feed><div><strong>'+esc(s.name)+'</strong> '+(s.enabled?'<span class="pill ok">Enabled</span>':'<span class=pill>Disabled</span>')+' '+(s.last_error?'<span class="pill bad">Error</span>':s.last_success&&s.last_item_count>0?'<span class="pill ok">Healthy</span>':s.last_success&&s.last_item_count===0?'<span class="pill warn">Connected · no items</span>':s.last_checked?'<span class="pill warn">Checked · no success</span>':'<span class="pill warn">Not checked</span>')+'<small>'+esc(s.url)+'</small><small>Last checked: '+esc(s.last_checked||'Never')+' · Items: '+s.last_item_count+' · Failed runs: '+s.consecutive_failures+'</small>'+(s.last_error?'<small class=bad>'+esc(s.last_error)+'</small>':'')+'</div><div class=feed-actions><button class=secondary data-action=toggle data-id='+s.id+' data-enabled='+(s.enabled?'false':'true')+'>'+(s.enabled?'Disable':'Enable')+'</button><button class=secondary data-action=edit data-id='+s.id+' data-name="'+esc(s.name)+'" data-url="'+esc(s.url)+'">Edit</button><button class=danger data-action=delete data-id='+s.id+'>Remove</button></div></div>').join('')||'<p class=muted>No sources yet. Add your first RSS feed above.</p>';
-$('stories').innerHTML=d.stories.map(s=>'<div class=story><h3>'+esc(s.title)+'</h3><p class=muted>'+esc(s.category||'Other')+' · '+esc(s.source_name)+' · '+s.source_count+' source match(es) · '+esc(s.status)+'</p><p>'+esc(s.summary||'No summary provided by feed.')+'</p><p class=muted>'+esc((s.research_flags||[]).join(' · '))+' · Evidence: '+esc(s.evidence_status||'single_source')+(s.is_breaking_candidate?' · BREAKING CANDIDATE — verify before use':'')+'</p><a href="'+esc(s.url)+'" target=_blank rel=noopener>Open original article</a></div>').join('')||'<p class=muted>No stories collected yet.</p>';
+
 }catch(e){$('message').textContent=e.message}}
+$('categoryFilter').addEventListener('change',renderStories);
 $('addForm').addEventListener('submit',async e=>{e.preventDefault();$('addBtn').disabled=true;try{await api('/api/admin/sources','POST',{name:$('sourceName').value,url:$('sourceUrl').value});$('message').textContent='Source added.';$('sourceName').value='';$('sourceUrl').value='';await load()}catch(err){$('message').textContent=err.message}finally{$('addBtn').disabled=false}});
 $('feeds').addEventListener('click',async e=>{const b=e.target.closest('button[data-action]');if(!b)return;const id=b.dataset.id;try{if(b.dataset.action==='toggle'){await api('/api/admin/sources/'+id,'PATCH',{enabled:b.dataset.enabled==='true'})}else if(b.dataset.action==='edit'){const name=prompt('Source name:',b.dataset.name);if(name===null)return;const url=prompt('RSS / Atom feed URL:',b.dataset.url);if(url===null)return;await api('/api/admin/sources/'+id,'PATCH',{name,url})}else if(b.dataset.action==='delete'){if(!confirm('Remove this source? Previously collected stories will remain.'))return;await api('/api/admin/sources/'+id,'DELETE')}await load()}catch(err){alert(err.message)}});
 $('collectBtn').addEventListener('click',async()=>{const b=$('collectBtn');b.disabled=true;b.textContent='Collecting…';$('message').textContent='Checking enabled RSS feeds…';try{const d=await api('/api/admin/collect','POST',{});$('message').textContent='Checked '+d.checked+' source(s): '+d.new+' new stories, '+d.matched+' similar-story matches, '+d.duplicates+' duplicates, '+d.failed+' failures.';await load();if(d.failed)alert('Some sources failed. Their error details are shown in Source Health.')}catch(e){$('message').textContent=e.message}finally{b.disabled=false;b.textContent='Collect news now'}});
@@ -882,8 +898,13 @@ def status():
         """).fetchall()
         rows = c.execute(
             """SELECT id,title,summary,url,source_name,source_count,draft,status,post_id,
-                      category,published_at,research_flags,evidence_status,is_breaking_candidate
-               FROM stories ORDER BY id DESC LIMIT 100"""
+                      category,published_at,research_flags,evidence_status,is_breaking_candidate,
+                      duplicate_group_key,
+                      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                          'source_name',ss.source_name,'article_url',ss.article_url,
+                          'title',ss.title,'published_at',ss.published_at
+                      ) ORDER BY ss.collected_at DESC) FROM story_sources ss WHERE ss.story_id=stories.id),'[]'::jsonb) AS provenance
+               FROM stories ORDER BY id DESC LIMIT 200"""
         ).fetchall()
         summary = c.execute("""
             SELECT
@@ -896,11 +917,23 @@ def status():
               COUNT(*) FILTER (WHERE enabled AND last_checked IS NOT NULL AND last_success IS NULL AND last_error IS NULL)::int AS checked_without_success_sources
             FROM sources
         """).fetchone()
+        research_summary = c.execute("""
+            SELECT
+              COUNT(*) FILTER (WHERE evidence_status='multiple_source_headline_match_only')::int AS multi_source_matches,
+              COUNT(*) FILTER (WHERE research_flags ? 'possibly_old_news')::int AS possibly_old,
+              COUNT(*) FILTER (WHERE is_breaking_candidate)::int AS breaking_candidates,
+              COUNT(*) FILTER (WHERE research_flags ? 'headline_only_no_article_summary')::int AS headline_only
+            FROM stories
+        """).fetchone()
+        categories = c.execute(
+            "SELECT category,COUNT(*)::int AS count FROM stories GROUP BY category ORDER BY category"
+        ).fetchall()
         story_count = c.execute("SELECT COUNT(*)::int AS count FROM stories").fetchone()["count"]
     return jsonify({
         "facebook": False,
         "auto": False,
-        "summary": {**dict(summary), "stories": story_count},
+        "summary": {**dict(summary), "stories": story_count, "research": dict(research_summary)},
+        "categories": [dict(x) for x in categories],
         "sources": [dict(x) for x in feeds],
         "stories": [dict(x) for x in rows]
     })
