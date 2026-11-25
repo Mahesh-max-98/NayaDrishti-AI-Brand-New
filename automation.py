@@ -1754,7 +1754,7 @@ def test_openrouter_connection():
         "model": model,
         "messages": [{"role": "user", "content": "Reply with exactly the word OK."}],
         "temperature": 0.2,
-        "max_tokens": 8
+        "max_tokens": 64
     }
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -1807,9 +1807,20 @@ def test_openrouter_connection():
         if result is None:
             return jsonify({"ok": False, "error": "OpenRouter did not return a response."}), 502
         choices = result.get("choices", [])
-        answer = choices[0].get("message", {}).get("content", "") if choices else ""
+        message = choices[0].get("message", {}) if choices and isinstance(choices[0], dict) else {}
+        answer = message.get("content", "") if isinstance(message, dict) else ""
+        if isinstance(answer, list):
+            answer = " ".join(
+                str(part.get("text", "")) for part in answer
+                if isinstance(part, dict) and part.get("type") in ("text", "output_text")
+            )
         if not isinstance(answer, str) or not answer.strip():
-            return jsonify({"ok": False, "error": "OpenRouter responded, but returned no text."}), 502
+            finish_reason = choices[0].get("finish_reason", "unknown") if choices and isinstance(choices[0], dict) else "no_choices"
+            return jsonify({
+                "ok": False,
+                "error": "OpenRouter returned no visible text. The selected free model may have used its token allowance for reasoning or returned an unsupported content format.",
+                "diagnostic": {"finish_reason": str(finish_reason), "choice_count": len(choices)}
+            }), 502
         with conn() as c:
             c.execute(
                 "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
