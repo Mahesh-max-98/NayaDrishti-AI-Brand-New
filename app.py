@@ -105,7 +105,7 @@ def assistant():
 @app.get("/health")
 def health():
     # Liveness check: confirms that the Flask application process is responding.
-    return jsonify({"service": "NayaDrishti AI", "status": "ok", "phase": 2})
+    return jsonify({"service": "NayaDrishti AI", "status": "ok", "phase": 3})
 
 
 @app.get("/ready")
@@ -127,13 +127,14 @@ def readiness():
         return jsonify({
             "service": "NayaDrishti AI",
             "status": "database_not_ready",
-            "phase": 2
+            "phase": 3
         }), 503
     return jsonify({
         "service": "NayaDrishti AI",
         "status": "ready",
-        "phase": 2,
-        "database": "connected"
+        "phase": 3,
+        "database": "connected",
+        "sources": database["sources"]
     })
 
 @app.post("/api/chat")
