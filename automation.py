@@ -495,7 +495,9 @@ def draft(title, summary, url=None):
                 if exc.code == 402:
                     raise RuntimeError("OpenRouter account needs credits or this model is unavailable on the current account." + suffix) from None
                 if exc.code == 429:
-                    raise RuntimeError("OpenRouter rate or usage limit reached. Please try again later." + suffix) from None
+                    last_issue = "OpenRouter rate or usage limit reached for " + selected_model + "." + suffix
+                    logger.warning("OpenRouter model %s was rate-limited; trying the next configured fallback.", selected_model)
+                    break
                 if exc.code in (400, 401, 403, 404):
                     raise RuntimeError(f"OpenRouter rejected the request (HTTP {exc.code}). Check the configured model and account access." + suffix) from None
                 last_issue = f"OpenRouter provider error HTTP {exc.code}." + suffix
