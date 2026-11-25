@@ -133,11 +133,11 @@ def init():
                     UNIQUE(story_id, article_url)
                 )
             """)
-            c.execute("CREATE INDEX IF NOT EXISTS idx_story_sources_story ON story_sources(story_id)")
-            c.execute("CREATE INDEX IF NOT EXISTS idx_story_sources_publisher ON story_sources(source_name)")
+            # Existing indexes were created by the earlier migration. Avoid
+            # taking locks on busy newsroom tables during a rolling deploy.
             c.execute("""
                 CREATE TABLE IF NOT EXISTS facebook_publications (
-                    story_id BIGINT PRIMARY KEY REFERENCES stories(id) ON DELETE CASCADE,
+                    story_id BIGINT PRIMARY KEY,
                     status TEXT NOT NULL,
                     facebook_post_id TEXT UNIQUE,
                     error TEXT,
