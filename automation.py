@@ -232,6 +232,7 @@ def database_status():
                        to_regclass('public.schema_migrations') IS NOT NULL AS migrations_ready,
                        to_regclass('public.sources') IS NOT NULL AS sources_ready,
                        to_regclass('public.stories') IS NOT NULL AS stories_ready,
+                       to_regclass('public.story_sources') IS NOT NULL AS story_sources_ready,
                        to_regclass('public.settings') IS NOT NULL AS settings_ready,
                        to_regclass('public.draft_revisions') IS NOT NULL AS revisions_ready,
                        to_regclass('public.activity_logs') IS NOT NULL AS logs_ready,
@@ -240,6 +241,7 @@ def database_status():
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=3) AS research_migration_ready,
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=4) AS provenance_migration_ready,
                        EXISTS(SELECT 1 FROM schema_migrations WHERE version=5) AS research_backfill_ready,
+                       EXISTS(SELECT 1 FROM schema_migrations WHERE version=6) AS publisher_provenance_ready,
                        (SELECT COUNT(*) FROM information_schema.columns
                         WHERE table_schema='public' AND table_name='sources'
                         AND column_name IN ('last_item_count','consecutive_failures'))=2 AS source_health_fields_ready,
@@ -248,8 +250,8 @@ def database_status():
             """).fetchone()
             ready = all(row[k] for k in (
                 "migrations_ready", "sources_ready", "stories_ready",
-                "settings_ready", "revisions_ready", "logs_ready",
-                "migration_applied", "source_migration_ready", "research_migration_ready", "provenance_migration_ready", "research_backfill_ready",
+                "settings_ready", "revisions_ready", "logs_ready", "story_sources_ready",
+                "migration_applied", "source_migration_ready", "research_migration_ready", "provenance_migration_ready", "research_backfill_ready", "publisher_provenance_ready",
                 "source_health_fields_ready", "default_settings_ready"
             ))
             if not ready:
@@ -689,11 +691,11 @@ def _backfill_research_fields():
                 (CASE WHEN published_at IS NULL THEN jsonb_build_array('publication_time_unknown') ELSE '[]'::jsonb END) ||
                 (CASE WHEN published_at < NOW() - INTERVAL '48 hours' THEN jsonb_build_array('possibly_old_news') ELSE '[]'::jsonb END) ||
                 (CASE WHEN source_count >= 2 THEN jsonb_build_array('similar_headline_seen_in_multiple_sources') ELSE '[]'::jsonb END) ||
-                (CASE WHEN source_count >= 3 AND published_at >= NOW() - INTERVAL '6 hours' THEN jsonb_build_array('breaking_candidate_requires_editorial_verification') ELSE '[]'::jsonb END),
+                (CASE WHEN source_count >= 3 AND published_at BETWEEN NOW() - INTERVAL '6 hours' AND NOW() THEN jsonb_build_array('breaking_candidate_requires_editorial_verification') ELSE '[]'::jsonb END),
             evidence_status = CASE WHEN source_count >= 2 THEN 'multiple_source_headline_match_only'
                                    WHEN COALESCE(summary,'')='' THEN 'headline_only_single_source'
                                    ELSE 'single_source_with_summary' END,
-            is_breaking_candidate = (source_count >= 3 AND published_at >= NOW() - INTERVAL '6 hours'),
+            is_breaking_candidate = (source_count >= 3 AND published_at BETWEEN NOW() - INTERVAL '6 hours' AND NOW()),
             duplicate_group_key = md5(trim(regexp_replace(lower(title), '[[:space:][:punct:]]+', ' ', 'g')))
         """)
         c.execute("INSERT INTO schema_migrations(version) VALUES(5) ON CONFLICT(version) DO NOTHING")
