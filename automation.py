@@ -146,6 +146,22 @@ def init():
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            c.execute("""
+                UPDATE stories
+                SET title=regexp_replace(title, '^[[:space:]]*(#{1,6}[[:space:]]*)?comment[[:space:]]+on[^\\n]*(\\n|$)', '', 'im'),
+                    summary=regexp_replace(summary, '^[[:space:]]*(#{1,6}[[:space:]]*)?comment[[:space:]]+on[^\\n]*(\\n|$)', '', 'im'),
+                    draft=regexp_replace(draft, '^[[:space:]]*(#{1,6}[[:space:]]*)?comment[[:space:]]+on[^\\n]*(\\n|$)', '', 'im')
+                WHERE title ~* '^[[:space:]]*(#{1,6}[[:space:]]*)?comment[[:space:]]+on'
+                   OR summary ~* '^[[:space:]]*(#{1,6}[[:space:]]*)?comment[[:space:]]+on'
+                   OR draft ~* '^[[:space:]]*(#{1,6}[[:space:]]*)?comment[[:space:]]+on'
+            """)
+            c.execute("""
+                UPDATE story_sources
+                SET title=regexp_replace(title, '^[[:space:]]*(#{1,6}[[:space:]]*)?comment[[:space:]]+on[^\\n]*(\\n|$)', '', 'im'),
+                    summary=regexp_replace(summary, '^[[:space:]]*(#{1,6}[[:space:]]*)?comment[[:space:]]+on[^\\n]*(\\n|$)', '', 'im')
+                WHERE title ~* '^[[:space:]]*(#{1,6}[[:space:]]*)?comment[[:space:]]+on'
+                   OR summary ~* '^[[:space:]]*(#{1,6}[[:space:]]*)?comment[[:space:]]+on'
+            """)
             c.execute("INSERT INTO schema_migrations(version) VALUES(6) ON CONFLICT(version) DO NOTHING")
             c.execute("INSERT INTO schema_migrations(version) VALUES(8) ON CONFLICT(version) DO NOTHING")
             return
@@ -351,8 +367,8 @@ def _build_draft_prompt(title, summary):
 
 
 def _remove_comment_on_heading(value):
-    """Remove unwanted Comment on headings from news posts and drafts."""
-    return re.sub(r"(?im)^\s*#{1,6}\s*comment\s+on\b[^\n]*(?:\n|$)", "", str(value or "")).strip()
+    """Remove standalone Comment on lines from all news content."""
+    return re.sub(r"(?im)^\s*(?:#{1,6}\s*)?comment\s+on\b[^\n]*(?:\n|$)", "", str(value or "")).strip()
 
 
 def _clean_news_draft(value, title=None):
@@ -885,6 +901,8 @@ def _backfill_research_fields():
         c.execute("INSERT INTO schema_migrations(version) VALUES(5) ON CONFLICT(version) DO NOTHING")
 
 def _add_with_conn(c, title, summary, url, source, published_at=None):
+    title = _remove_comment_on_heading(title)
+    summary = _remove_comment_on_heading(summary)
     if not title or not url.startswith(("http://", "https://")):
         return "duplicate"
     category = _research_category(title, summary)
