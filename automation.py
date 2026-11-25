@@ -504,6 +504,47 @@ def _fetch_feed(url):
             last_error = exc
             continue
 
+    # Ujyaalo's current homepage is reachable but can be rendered without
+    # article anchors for non-browser clients. Its public section pages expose
+    # normal article links, so use several sections as a bounded fallback.
+    source_host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    if reachable_html and source_host.endswith("ujyaaloonline.com"):
+        combined = []
+        seen_links = set()
+        for section_path in ("/sport", "/politics", "/society", "/economy", "/technology", "/world"):
+            section_url = urllib.parse.urljoin(base, section_path.lstrip("/"))
+            try:
+                _validate_feed_url(section_url)
+                section_req = urllib.request.Request(
+                    section_url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml"
+                    }
+                )
+                with urllib.request.build_opener(_SafeFeedRedirect()).open(section_req, timeout=4) as section_response:
+                    section_payload = section_response.read(4 * 1024 * 1024 + 1)
+                    if len(section_payload) > 4 * 1024 * 1024:
+                        continue
+                    section_html = section_payload.decode("utf-8", errors="replace")
+                    section_parser = _HomepageLinks(section_response.geturl())
+                    section_parser.feed(section_html)
+                    for item in section_parser.entries:
+                        if item["link"] not in seen_links:
+                            seen_links.add(item["link"])
+                            combined.append(item)
+                        if len(combined) >= 25:
+                            break
+                if len(combined) >= 25:
+                    break
+            except Exception as exc:
+                last_error = exc
+                continue
+        if combined:
+            class _SectionResult:
+                entries = combined
+            return _SectionResult()
+
     # HTTP 200 HTML means the publisher is reachable even if its page exposes
     # no article links our generic parser can read. The dashboard must show
     # this as connected-without-items, not pretend news was collected.
