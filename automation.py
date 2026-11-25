@@ -1769,17 +1769,30 @@ def test_groq_connection():
                     continue
                 try:
                     payload = json.loads(exc.read(8192).decode("utf-8", errors="replace"))
-                    detail = str(payload.get("error", {}).get("message", "")).strip()
+                    error_data = payload.get("error", {}) if isinstance(payload, dict) else {}
+                    if isinstance(error_data, dict):
+                        detail = str(error_data.get("message", "")).strip()
+                        provider_code = str(error_data.get("code", "")).strip()
+                        provider_type = str(error_data.get("type", "")).strip()
+                    else:
+                        detail = str(error_data or "").strip()
+                        provider_code = ""
+                        provider_type = ""
                 except Exception:
                     detail = ""
-                detail = re.sub(r"\\s+", " ", detail)[:200]
+                    provider_code = ""
+                    provider_type = ""
+                detail = re.sub(r"\\s+", " ", detail)[:240]
                 if key and detail:
                     detail = detail.replace(key, "[redacted]")
-                suffix = " Provider says: " + detail if detail else ""
+                diagnostics = [item for item in (provider_code, provider_type) if item]
+                suffix = (" Provider code: " + " / ".join(diagnostics) + ".") if diagnostics else ""
+                if detail:
+                    suffix += " Provider says: " + detail
                 if exc.code == 429:
                     message = "Groq rate limit or usage limit reached. Check your Groq account limits." + suffix
                 elif exc.code in (400, 401, 403, 404):
-                    message = f"Groq rejected the test request (HTTP {exc.code}). Check the key, model and account access." + suffix
+                    message = f"Groq rejected the test request (HTTP {exc.code})." + suffix
                 else:
                     message = f"Groq is still unavailable after retries (HTTP {exc.code}). Try again later." + suffix
                 return jsonify({"ok": False, "error": message}), 502
