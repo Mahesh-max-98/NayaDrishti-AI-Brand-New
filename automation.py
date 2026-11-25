@@ -115,8 +115,25 @@ def init():
         current_version = c.execute(
             "SELECT COALESCE(MAX(version),0)::int AS version FROM schema_migrations"
         ).fetchone()["version"]
-        # Avoid taking AccessExclusive locks on live newsroom tables at every restart.
+        # Phase 6 migration: Phase 4 introduced publisher provenance, but
+        # databases already at version 4 may predate the story_sources table.
         if current_version >= 4:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS story_sources (
+                    id BIGSERIAL PRIMARY KEY,
+                    story_id BIGINT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+                    source_name TEXT NOT NULL,
+                    article_url TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL DEFAULT '',
+                    published_at TIMESTAMPTZ,
+                    collected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE(story_id, article_url)
+                )
+            """)
+            c.execute("CREATE INDEX IF NOT EXISTS idx_story_sources_story ON story_sources(story_id)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_story_sources_publisher ON story_sources(source_name)")
+            c.execute("INSERT INTO schema_migrations(version) VALUES(6) ON CONFLICT(version) DO NOTHING")
             return
         c.execute("""
             CREATE TABLE IF NOT EXISTS sources (
