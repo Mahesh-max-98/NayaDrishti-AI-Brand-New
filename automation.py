@@ -73,6 +73,8 @@ def collect():
   except Exception:pass
  return added
 def publish(sid,manual=False):
+ # Facebook integration is intentionally locked until Phase 9.
+ return False,"Facebook publishing is disabled until Phase 9."
  token=os.getenv("FB_PAGE_ACCESS_TOKEN");page=os.getenv("FB_PAGE_ID")
  if not token or not page:return False,"Facebook Page credentials are not configured."
  with conn() as c:s=c.execute("SELECT * FROM stories WHERE id=?",(sid,)).fetchone()
@@ -96,6 +98,8 @@ def publish(sid,manual=False):
   return False,msg[:250]
  except Exception:return False,"Facebook connection failed."
 def cycle():
+ # Scheduled publishing and collection automation are introduced in later phases.
+ return
  try:
   if getset("auto")!="1":return
   collect()
@@ -118,11 +122,19 @@ async function toggle(){try{await api('/api/admin/auto',{});load()}catch(e){aler
 async function pub(id){if(!confirm('Publish this reviewed post to Facebook?'))return;try{await api('/api/admin/publish/'+id,{});alert('Published');load()}catch(e){alert(e.message)}}
 load()</script>"""
 @bp.get("/admin/login")
-def login():return render_template_string(LOGIN,error="")
+def login():
+ missing = not os.getenv("ADMIN_PASSWORD") or not os.getenv("SECRET_KEY")
+ message = "Admin login is not configured. Add ADMIN_PASSWORD and SECRET_KEY in Render." if missing else ""
+ return render_template_string(LOGIN,error=message)
 @bp.post("/admin/login")
 def login_post():
  p=os.getenv("ADMIN_PASSWORD","")
- if p and secrets.compare_digest(request.form.get("password",""),p):session["nd_admin"]=True;return redirect("/admin")
+ secret=os.getenv("SECRET_KEY","")
+ if p and secret and secrets.compare_digest(request.form.get("password",""),p):
+  session.clear()
+  session.permanent=True
+  session["nd_admin"]=True
+  return redirect("/admin")
  return render_template_string(LOGIN,error="Incorrect password or admin is not configured."),401
 @bp.get("/admin/logout")
 def logout():session.clear();return redirect("/admin/login")
@@ -151,9 +163,7 @@ def collect_now():return jsonify({"added":collect()})
 @bp.post("/api/admin/auto")
 @auth
 def auto_toggle():
- new="0" if getset("auto")=="1" else "1"
- if new=="1" and not(os.getenv("FB_PAGE_ID") and os.getenv("FB_PAGE_ACCESS_TOKEN") and os.getenv("GEMINI_API_KEY")):return jsonify({"error":"Configure FB_PAGE_ID, FB_PAGE_ACCESS_TOKEN and GEMINI_API_KEY in Render first."}),400
- setset("auto",new);return jsonify({"auto":new=="1"})
+ return jsonify({"error":"Automatic publishing is reserved for Phase 9 and is disabled for now."}),403
 @bp.post("/api/admin/publish/<int:sid>")
 @auth
 def publish_now(sid):
