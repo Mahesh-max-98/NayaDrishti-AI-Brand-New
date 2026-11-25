@@ -44,11 +44,11 @@ def conn():
 # RSS feeds are used where available. For outlets without a verified feed,
 # the collector reads the public homepage and extracts same-site article links.
 DEFAULT_SOURCES = [
-    ("RONB / Routine of Nepal Banda", "https://ronbpost.com/"),
+    ("RONB / Routine of Nepal Banda", "https://www.ronbpost.com/"),
     ("BBC Nepali", "https://www.bbc.com/nepali"),
     ("Onlinekhabar", "https://www.onlinekhabar.com/feed"),
     ("OK Khabar", "https://okkhabar.com/"),
-    ("Laliguras Media Network", "https://english.laligurash.com/"),
+    ("Laliguras Media Network", "https://www.laligurash.com/"),
     ("Troll Cricket Nepal", "https://trollcricketnepal.com/"),
     ("eKantipur / Kantipur", "https://ekantipur.com/"),
     ("Ratopati", "https://www.ratopati.com/feed"),
@@ -72,6 +72,19 @@ DEFAULT_SOURCES = [
 def seed_default_sources():
     """Install known public Nepal-news RSS feeds without admin data entry."""
     with conn() as c:
+        # Migrate default sources whose verified RSS endpoints changed.
+        for name, old_url, new_url in (
+            ("Nagarik News", "https://nagariknews.nagariknetwork.com/", "https://nagariknews.nagariknetwork/feed"),
+            ("Gorkhapatra", "https://gorkhapatraonline.com/", "https://gorkhapatraonline.com/rss"),
+        ):
+            c.execute(
+                "DELETE FROM sources WHERE name=%s AND url=%s AND EXISTS (SELECT 1 FROM sources WHERE url=%s)",
+                (name, old_url, new_url)
+            )
+            c.execute(
+                "UPDATE sources SET url=%s,last_checked=NULL,last_success=NULL,last_error=NULL,last_item_count=0,consecutive_failures=0 WHERE name=%s AND url=%s",
+                (new_url, name, old_url)
+            )
         for name, url in DEFAULT_SOURCES:
             c.execute(
                 "INSERT INTO sources(name,url) VALUES(%s,%s) ON CONFLICT(url) DO UPDATE SET name=EXCLUDED.name",
@@ -283,7 +296,8 @@ class _HomepageLinks(HTMLParser):
     def __init__(self, base_url):
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
-        self.host = urllib.parse.urlsplit(base_url).hostname
+        self.host = (urllib.parse.urlsplit(base_url).hostname or "").lower()
+        self.root_host = ".".join(self.host.split(".")[-2:])
         self.current = None
         self.entries = []
         self.seen = set()
@@ -305,8 +319,10 @@ class _HomepageLinks(HTMLParser):
         link = self.current["href"]
         self.current = None
         parsed = urllib.parse.urlsplit(link)
-        if (len(title) < 18 or len(title) > 240 or parsed.scheme not in ("http", "https")
-                or parsed.hostname != self.host or link in self.seen):
+        link_host = (parsed.hostname or "").lower()
+        same_site = link_host == self.host or link_host.endswith("." + self.root_host) or self.host.endswith("." + link_host)
+        if (len(title) < 12 or len(title) > 240 or parsed.scheme not in ("http", "https")
+                or not same_site or link in self.seen):
             return
         if any(x in parsed.path.lower() for x in ("/category/", "/tag/", "/author/", "/login", "/contact", "/about")):
             return
@@ -339,10 +355,10 @@ def _fetch_feed(url):
         return parsed
     # Several requested publishers expose no discoverable RSS feed. Read only
     # their public homepage/notice page and collect same-domain article links.
-    parser = _HomepageLinks(url)
+    # Use the final URL after a permitted same-site redirect so canonical
+    # www/non-www links are still recognized as belonging to this publisher.
+    parser = _HomepageLinks(response.geturl())
     parser.feed(payload.decode("utf-8", errors="replace"))
-    if not parser.entries:
-        raise RuntimeError("No RSS entries or readable article links were found on this source page.")
     class _Result:
         entries = parser.entries
     return _Result()
