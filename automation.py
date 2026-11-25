@@ -9,6 +9,7 @@ import logging
 import socket
 import ipaddress
 import html
+from html.parser import HTMLParser
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from functools import wraps
@@ -39,14 +40,31 @@ def conn():
     return c
 
 
+# RSS feeds are used where available. For outlets without a verified feed,
+# the collector reads the public homepage and extracts same-site article links.
 DEFAULT_SOURCES = [
+    ("RONB / Routine of Nepal Banda", "https://ronbpost.com/"),
+    ("BBC Nepali", "https://www.bbc.com/nepali"),
     ("Onlinekhabar", "https://www.onlinekhabar.com/feed"),
-    ("Setopati", "https://www.setopati.com/feed"),
+    ("OK Khabar", "https://okkhabar.com/"),
+    ("Laliguras Media Network", "https://english.laligurash.com/"),
+    ("Troll Cricket Nepal", "https://trollcricketnepal.com/"),
+    ("eKantipur / Kantipur", "https://ekantipur.com/"),
     ("Ratopati", "https://www.ratopati.com/feed"),
+    ("Annapurna Post", "https://annapurnapost.com/"),
+    ("Setopati", "https://www.setopati.com/feed"),
+    ("Nagarik News", "https://nagariknews.nagariknetwork.com/"),
+    ("Gorkhapatra", "https://gorkhapatraonline.com/"),
+    ("Ujyaalo Online", "https://www.ujyaaloonline.com/"),
+    ("Thaha Khabar", "https://thahakhabar.com/"),
+    ("Nepal Samaya", "https://nepalsamaya.com/"),
+    ("NEB Official Notices", "https://neb.gov.np/news-notices"),
+    ("Government of Nepal Portal", "https://nepal.gov.np/"),
     ("Artha Sarokar", "https://arthasarokar.com/feed"),
     ("Rajdhani Daily", "https://rajdhanidaily.com/feed"),
     ("News of Nepal", "https://newsofnepal.com/feed"),
     ("Techmandu", "https://techmandu.com/feed"),
+    ("The Rising Nepal (Government-owned)", "https://risingnepaldaily.com/"),
 ]
 
 
@@ -55,7 +73,7 @@ def seed_default_sources():
     with conn() as c:
         for name, url in DEFAULT_SOURCES:
             c.execute(
-                "INSERT INTO sources(name,url) VALUES(%s,%s) ON CONFLICT(url) DO NOTHING",
+                "INSERT INTO sources(name,url) VALUES(%s,%s) ON CONFLICT(url) DO UPDATE SET name=EXCLUDED.name",
                 (name, url)
             )
 
@@ -259,24 +277,70 @@ class _SafeFeedRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+class _HomepageLinks(HTMLParser):
+    """Extract article-like same-site links from public HTML pages."""
+    def __init__(self, base_url):
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.host = urllib.parse.urlsplit(base_url).hostname
+        self.current = None
+        self.entries = []
+        self.seen = set()
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            href = dict(attrs).get("href", "")
+            if href:
+                self.current = {"href": urllib.parse.urljoin(self.base_url, href), "text": []}
+
+    def handle_data(self, data):
+        if self.current is not None:
+            self.current["text"].append(data)
+
+    def handle_endtag(self, tag):
+        if tag != "a" or self.current is None:
+            return
+        title = _plain_text(" ".join(self.current["text"]))
+        link = self.current["href"]
+        self.current = None
+        parsed = urllib.parse.urlsplit(link)
+        if (len(title) < 18 or len(title) > 240 or parsed.scheme not in ("http", "https")
+                or parsed.hostname != self.host or link in self.seen):
+            return
+        if any(x in parsed.path.lower() for x in ("/category/", "/tag/", "/author/", "/login", "/contact", "/about")):
+            return
+        self.seen.add(link)
+        self.entries.append({"title": title, "link": link, "summary": ""})
+
+
 def _fetch_feed(url):
     _validate_feed_url(url)
     opener = urllib.request.build_opener(_SafeFeedRedirect())
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "NayaDrishtiNewsCollector/1.0", "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*"}
+        headers={"User-Agent": "Mozilla/5.0 (compatible; NayaDrishtiNewsCollector/1.0)",
+                 "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html, */*"}
     )
     with opener.open(req, timeout=18) as response:
         status = getattr(response, "status", 200)
         if status < 200 or status >= 300:
-            raise RuntimeError("Feed server returned HTTP " + str(status))
+            raise RuntimeError("Source server returned HTTP " + str(status))
         payload = response.read(4 * 1024 * 1024 + 1)
         if len(payload) > 4 * 1024 * 1024:
-            raise RuntimeError("Feed is larger than the 4 MB safety limit.")
-        parsed = feedparser.parse(payload, response_headers=dict(response.headers.items()))
-    if parsed.bozo and not parsed.entries:
-        raise RuntimeError("The server response is not a readable RSS or Atom feed.")
-    return parsed
+            raise RuntimeError("Source page is larger than the 4 MB safety limit.")
+        headers = dict(response.headers.items())
+        parsed = feedparser.parse(payload, response_headers=headers)
+    if parsed.entries:
+        return parsed
+    # Several requested publishers expose no discoverable RSS feed. Read only
+    # their public homepage/notice page and collect same-domain article links.
+    parser = _HomepageLinks(url)
+    parser.feed(payload.decode("utf-8", errors="replace"))
+    if not parser.entries:
+        raise RuntimeError("No RSS entries or readable article links were found on this source page.")
+    class _Result:
+        entries = parser.entries
+    return _Result()
 
 
 def _plain_text(value):
@@ -343,9 +407,9 @@ def collect():
             entries = parsed.entries[:50]
             result["items_seen"] = len(entries)
             for entry in entries:
-                title = _plain_text(getattr(entry, "title", ""))
-                link = str(getattr(entry, "link", "") or "").strip()
-                summary = _plain_text(getattr(entry, "summary", "") or getattr(entry, "description", ""))
+                title = _plain_text(entry.get("title", "") if isinstance(entry, dict) else getattr(entry, "title", ""))
+                link = str(entry.get("link", "") if isinstance(entry, dict) else (getattr(entry, "link", "") or "")).strip()
+                summary = _plain_text(entry.get("summary", "") if isinstance(entry, dict) else (getattr(entry, "summary", "") or getattr(entry, "description", "")))
                 if not title or not link.startswith(("https://", "http://")):
                     result["duplicates"] += 1
                     continue
