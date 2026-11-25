@@ -53,7 +53,7 @@ DEFAULT_SOURCES = [
     ("Troll Cricket Nepal", "https://trollcricketnepal.com/"),
     ("eKantipur / Kantipur", "https://ekantipur.com/"),
     ("Ratopati", "https://www.ratopati.com/feed"),
-    ("Annapurna Post", "https://annapurnapost.com/"),
+    ("The Annapurna Express", "https://theannapurnaexpress.com/"),
     ("Setopati", "https://www.setopati.com/feed"),
     ("Nagarik News", "https://nagariknews.nagariknetwork.com/feed"),
     ("Gorkhapatra", "https://gorkhapatraonline.com/rss"),
@@ -88,6 +88,7 @@ def seed_default_sources():
             ("Ujyaalo Online", "https://www.ujyaaloonline.com/", ["https://ujyaaloonline.com/rss", "https://www.ujyaaloonline.com/rss"]),
             ("Ministry of Education, Science and Technology", "https://www.moest.gov.np/", ["https://nepal.gov.np/"]),
             ("Curriculum Development Centre", "https://www.moecdc.gov.np/", ["https://techmandu.com/feed"]),
+            ("The Annapurna Express", "https://theannapurnaexpress.com/", ["https://annapurnapost.com/"]),
         ):
             for duplicate_url in duplicate_urls:
                 c.execute("DELETE FROM sources WHERE url=%s AND EXISTS (SELECT 1 FROM sources WHERE url=%s)", (duplicate_url, keep_url))
