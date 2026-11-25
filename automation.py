@@ -135,7 +135,18 @@ def init():
             """)
             c.execute("CREATE INDEX IF NOT EXISTS idx_story_sources_story ON story_sources(story_id)")
             c.execute("CREATE INDEX IF NOT EXISTS idx_story_sources_publisher ON story_sources(source_name)")
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS facebook_publications (
+                    story_id BIGINT PRIMARY KEY REFERENCES stories(id) ON DELETE CASCADE,
+                    status TEXT NOT NULL,
+                    facebook_post_id TEXT UNIQUE,
+                    error TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
             c.execute("INSERT INTO schema_migrations(version) VALUES(6) ON CONFLICT(version) DO NOTHING")
+            c.execute("INSERT INTO schema_migrations(version) VALUES(8) ON CONFLICT(version) DO NOTHING")
             return
         c.execute("""
             CREATE TABLE IF NOT EXISTS sources (
@@ -185,6 +196,16 @@ def init():
         c.execute("CREATE INDEX IF NOT EXISTS idx_story_sources_story ON story_sources(story_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_story_sources_publisher ON story_sources(source_name)")
         c.execute("""
+            CREATE TABLE IF NOT EXISTS facebook_publications (
+                story_id BIGINT PRIMARY KEY REFERENCES stories(id) ON DELETE CASCADE,
+                status TEXT NOT NULL,
+                facebook_post_id TEXT UNIQUE,
+                error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        c.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -223,6 +244,7 @@ def init():
         c.execute("INSERT INTO schema_migrations(version) VALUES(2) ON CONFLICT(version) DO NOTHING")
         c.execute("INSERT INTO schema_migrations(version) VALUES(3) ON CONFLICT(version) DO NOTHING")
         c.execute("INSERT INTO schema_migrations(version) VALUES(4) ON CONFLICT(version) DO NOTHING")
+        c.execute("INSERT INTO schema_migrations(version) VALUES(8) ON CONFLICT(version) DO NOTHING")
 
 
 def database_status():
@@ -933,9 +955,161 @@ def collect():
     return totals
 
 
+def _facebook_config():
+    page_id = os.getenv("FACEBOOK_PAGE_ID", "").strip()
+    token = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN", "").strip()
+    version = os.getenv("FACEBOOK_GRAPH_API_VERSION", "v27.0").strip()
+    if not re.fullmatch(r"v[0-9]+\\.[0-9]+", version):
+        version = "v27.0"
+    publishing_enabled = os.getenv("FACEBOOK_PUBLISHING_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+    auto_publish_enabled = os.getenv("FACEBOOK_AUTO_PUBLISH_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+    return {
+        "page_id": page_id,
+        "token": token,
+        "version": version,
+        "configured": bool(page_id and token),
+        "publishing_enabled": publishing_enabled,
+        "auto_publish_enabled": auto_publish_enabled
+    }
+
+
+def _facebook_graph_request(method, edge, params):
+    config = _facebook_config()
+    if not config["configured"]:
+        raise RuntimeError("Facebook Page ID and Page access token are not configured in Render.")
+    safe_edge = str(edge or "").strip("/")
+    if not safe_edge or not re.fullmatch(r"[0-9]+(?:/[A-Za-z_]+)?", safe_edge):
+        raise RuntimeError("Invalid Facebook Graph API endpoint.")
+    base = f"https://graph.facebook.com/{config['version']}/{safe_edge}"
+    values = dict(params or {})
+    values["access_token"] = config["token"]
+    if method == "GET":
+        url = base + "?" + urllib.parse.urlencode(values)
+        data = None
+    elif method == "POST":
+        url = base
+        data = urllib.parse.urlencode(values).encode("utf-8")
+    else:
+        raise RuntimeError("Unsupported Facebook request method.")
+    req = urllib.request.Request(
+        url, data=data,
+        headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+        method=method
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=25) as response:
+            result = json.loads(response.read(1024 * 1024).decode("utf-8"))
+        if not isinstance(result, dict) or result.get("error"):
+            raise RuntimeError("Facebook returned an invalid API response.")
+        return result
+    except urllib.error.HTTPError as exc:
+        # Do not log or return request URLs, headers, access tokens, or raw payloads.
+        try:
+            payload = json.loads(exc.read(8192).decode("utf-8", errors="replace"))
+            api_error = payload.get("error", {}) if isinstance(payload, dict) else {}
+            code = api_error.get("code")
+            message = str(api_error.get("message", "")).strip()
+        except Exception:
+            code, message = None, ""
+        detail = f" ({message[:180]})" if message else ""
+        code_label = f", code {code}" if code is not None else ""
+        raise RuntimeError(f"Facebook Graph API rejected the request (HTTP {exc.code}{code_label}).{detail}") from None
+    except (urllib.error.URLError, TimeoutError):
+        raise RuntimeError("Facebook could not be reached. The connection result is unknown; check Facebook before retrying.") from None
+    except (ValueError, TypeError):
+        raise RuntimeError("Facebook returned an unreadable response.") from None
+
+
+def facebook_connection_status():
+    config = _facebook_config()
+    with conn() as c:
+        last = c.execute("""
+            SELECT details,created_at FROM activity_logs
+            WHERE event_type='facebook_connection_test'
+            ORDER BY id DESC LIMIT 1
+        """).fetchone()
+    details = dict(last["details"]) if last and last["details"] else {}
+    return {
+        "configured": config["configured"],
+        "page_id": config["page_id"] if config["configured"] else None,
+        "publishing_enabled": config["publishing_enabled"],
+        "auto_publish_enabled": config["auto_publish_enabled"],
+        "last_test_ok": bool(details.get("ok")) if last else False,
+        "last_test_page_name": details.get("page_name") if last else None,
+        "last_test_at": last["created_at"].isoformat() if last else None
+    }
+
+
 def publish(sid, manual=False):
-    # Facebook publishing is intentionally locked until Phase 9.
-    return False, "Facebook publishing is disabled until Phase 9."
+    config = _facebook_config()
+    if not config["publishing_enabled"]:
+        return False, "Facebook publishing is OFF. It must be explicitly enabled after the read-only connection test."
+    if not config["configured"]:
+        return False, "Facebook Page ID and Page access token are not configured in Render."
+
+    # Reserve this story before making the external request. A previous attempt,
+    # including an uncertain timeout, blocks automatic retries to avoid duplicates.
+    with conn() as c:
+        row = c.execute(
+            "SELECT id,draft,status,post_id FROM stories WHERE id=%s FOR UPDATE",
+            (sid,)
+        ).fetchone()
+        if not row:
+            return False, "Story not found."
+        if row["status"] != "approved":
+            return False, "Only drafts explicitly approved by the admin can be published."
+        if not str(row["draft"] or "").strip():
+            return False, "This approved story has no saved draft."
+        if row["post_id"]:
+            return False, "This story already has a Facebook post ID; duplicate publishing is blocked."
+        prior = c.execute(
+            "SELECT status FROM facebook_publications WHERE story_id=%s",
+            (sid,)
+        ).fetchone()
+        if prior:
+            return False, "A Facebook publishing attempt already exists. Check its status before retrying."
+        c.execute(
+            "INSERT INTO facebook_publications(story_id,status) VALUES(%s,'publishing')",
+            (sid,)
+        )
+
+    try:
+        result = _facebook_graph_request(
+            "POST", f"{config['page_id']}/feed",
+            {"message": str(row["draft"]).strip()}
+        )
+        post_id = str(result.get("id", "")).strip()
+        if not post_id:
+            raise RuntimeError("Facebook did not return a post ID. The result needs manual verification.")
+    except RuntimeError as exc:
+        message = str(exc)[:300]
+        unknown = "result is unknown" in message.lower() or "manual verification" in message.lower()
+        state = "unknown" if unknown else "failed"
+        with conn() as c:
+            c.execute(
+                "UPDATE facebook_publications SET status=%s,error=%s,updated_at=NOW() WHERE story_id=%s",
+                (state, message, sid)
+            )
+            c.execute(
+                "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+                ("facebook_publish_" + state, "Facebook publishing attempt did not confirm success.", Jsonb({"story_id": sid, "error": message}))
+            )
+        return False, message
+
+    with conn() as c:
+        c.execute(
+            "UPDATE facebook_publications SET status='published',facebook_post_id=%s,error=NULL,updated_at=NOW() WHERE story_id=%s",
+            (post_id, sid)
+        )
+        c.execute(
+            "UPDATE stories SET status='published',post_id=%s,published_at=NOW(),published=NOW(),updated_at=NOW() WHERE id=%s",
+            (post_id, sid)
+        )
+        c.execute(
+            "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+            ("facebook_published", "An approved news draft was published to the connected Facebook Page.", Jsonb({"story_id": sid, "post_id": post_id}))
+        )
+    return True, post_id
 
 
 def cycle():
@@ -1258,6 +1432,11 @@ def status():
             WHERE event_type IN ('collection_finished','collection_failed')
             ORDER BY id DESC LIMIT 8
         """).fetchall()
+        facebook_test_row = c.execute("""
+            SELECT details,created_at FROM activity_logs
+            WHERE event_type='facebook_connection_test'
+            ORDER BY id DESC LIMIT 1
+        """).fetchone()
     job = scheduler.get_job("automatic-news-collection")
     monitoring = {
         "scheduler_running": bool(scheduler.running),
@@ -1270,11 +1449,27 @@ def status():
         "last_failed_at": monitoring_row["last_failed_at"].isoformat() if monitoring_row["last_failed_at"] else None,
         "last_failure": dict(monitoring_row["last_failure"]) if monitoring_row["last_failure"] else None
     }
+    fb_config = _facebook_config()
+    fb_test = dict(facebook_test_row["details"]) if facebook_test_row and facebook_test_row["details"] else {}
+    facebook_connection = {
+        "configured": fb_config["configured"],
+        "page_id": fb_config["page_id"] if fb_config["configured"] else None,
+        "publishing_enabled": fb_config["publishing_enabled"],
+        "auto_publish_enabled": fb_config["auto_publish_enabled"],
+        "last_test_ok": bool(fb_test.get("ok")) if facebook_test_row else False,
+        "last_test_page_name": fb_test.get("page_name") if facebook_test_row else None,
+        "last_test_at": facebook_test_row["created_at"].isoformat() if facebook_test_row else None
+    }
+    facebook_health = (
+        "connected_read_only" if facebook_connection["last_test_ok"] else
+        "configured_not_tested" if facebook_connection["configured"] else
+        "not_configured"
+    )
     system_health = {
         "database": "connected",
         "scheduler": "running" if monitoring["scheduler_running"] else "stopped",
         "ai": "configured" if bool(os.getenv("GEMINI_API_KEY", "").strip()) else "not_configured",
-        "facebook": "disabled_until_phase_9",
+        "facebook": facebook_health,
         "enabled_sources": summary["enabled_sources"],
         "healthy_sources": summary["healthy_sources"],
         "source_errors": summary["error_sources"],
@@ -1293,6 +1488,7 @@ def status():
     }
     return jsonify({
         "facebook": False,
+        "facebook_connection": facebook_connection,
         "monitoring": monitoring,
         "system_health": system_health,
         "analytics": analytics,
@@ -1511,6 +1707,43 @@ def generate_story_draft(sid):
              Jsonb({"story_id": sid, "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash")}))
         )
     return jsonify({"ok": True, "story_id": sid, "draft": generated, "review_required": True})
+
+@bp.get("/api/admin/facebook/status")
+@auth
+def facebook_status():
+    config = _facebook_config()
+    state = facebook_connection_status()
+    state["publishing_note"] = "Publishing remains disabled unless FACEBOOK_PUBLISHING_ENABLED is explicitly set in Render."
+    return jsonify(state)
+
+
+@bp.post("/api/admin/facebook/test")
+@auth
+def facebook_test_connection():
+    config = _facebook_config()
+    if not config["configured"]:
+        return jsonify({"error": "Add FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN directly in Render environment settings first. Never paste the token into chat."}), 400
+    try:
+        page = _facebook_graph_request("GET", config["page_id"], {"fields": "id,name"})
+        returned_id = str(page.get("id", "")).strip()
+        page_name = str(page.get("name", "")).strip()
+        if returned_id != config["page_id"] or not page_name:
+            raise RuntimeError("Facebook returned a different or incomplete Page identity. Check the Page ID and token.")
+        with conn() as c:
+            c.execute(
+                "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+                ("facebook_connection_test", "Facebook Page read-only connection test succeeded.", Jsonb({"ok": True, "page_id": returned_id, "page_name": page_name}))
+            )
+        return jsonify({"ok": True, "page_id": returned_id, "page_name": page_name, "publishing_enabled": config["publishing_enabled"], "read_only": True})
+    except RuntimeError as exc:
+        message = str(exc)[:300]
+        with conn() as c:
+            c.execute(
+                "INSERT INTO activity_logs(event_type,message,details) VALUES(%s,%s,%s)",
+                ("facebook_connection_test", "Facebook Page read-only connection test failed.", Jsonb({"ok": False, "error": message}))
+            )
+        return jsonify({"error": message}), 502
+
 
 @bp.post("/api/admin/auto")
 @auth
