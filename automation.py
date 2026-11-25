@@ -1021,12 +1021,13 @@ def _add_with_conn(c, title, summary, url, source, published_at=None):
         names = list(existing["sources"] or [])
         if source not in names:
             names.append(source)
-            merged_summary = existing.get("summary") or summary or ""
+            old_summary = str(existing.get("summary") or "")
+            merged_summary = summary if len(old_summary.strip()) < 35 and len(str(summary or "").strip()) >= 35 else (old_summary or summary or "")
             flags, evidence, breaking = _research_metadata(names, published_at or existing["published_at"], existing["created"], merged_summary)
             _record_story_source(c, existing["id"], source, title, summary, url, published_at)
             c.execute(
                 """UPDATE stories SET sources=%s,source_count=%s,
-                   summary=CASE WHEN COALESCE(summary,'')='' AND %s<>'' THEN %s ELSE summary END,
+                   summary=CASE WHEN length(trim(COALESCE(summary,'')))<35 AND length(trim(%s))>=35 THEN %s ELSE summary END,
                    published_at=COALESCE(published_at,%s),research_flags=%s,
                    evidence_status=%s,is_breaking_candidate=%s,updated_at=NOW()
                    WHERE id=%s""",
@@ -1035,7 +1036,7 @@ def _add_with_conn(c, title, summary, url, source, published_at=None):
             )
             return "matched"
         _record_story_source(c, existing["id"], source, title, summary, url, published_at)
-        if summary and not existing.get("summary"):
+        if len(str(existing.get("summary") or "").strip()) < 35 and len(str(summary or "").strip()) >= 35:
             flags, evidence, breaking = _research_metadata(names, published_at or existing["published_at"], existing["created"], summary)
             c.execute(
                 """UPDATE stories SET summary=%s,research_flags=%s,evidence_status=%s,
@@ -1066,11 +1067,13 @@ def _add_with_conn(c, title, summary, url, source, published_at=None):
         names = list(match["sources"] or [])
         if source not in names:
             names.append(source)
-        flags, evidence, breaking = _research_metadata(names, match["published_at"] or published_at, match["created"], match["summary"] or summary)
+        prior_summary = str(match["summary"] or "")
+        merged_summary = summary if len(prior_summary.strip()) < 35 and len(str(summary or "").strip()) >= 35 else (prior_summary or summary)
+        flags, evidence, breaking = _research_metadata(names, match["published_at"] or published_at, match["created"], merged_summary)
         _record_story_source(c, match["id"], source, title, summary, url, published_at)
         c.execute(
             """UPDATE stories SET sources=%s,source_count=%s,
-               summary=CASE WHEN summary='' AND %s<>'' THEN %s ELSE summary END,
+               summary=CASE WHEN length(trim(COALESCE(summary,'')))<35 AND length(trim(%s))>=35 THEN %s ELSE summary END,
                published_at=COALESCE(published_at,%s),research_flags=%s,
                evidence_status=%s,is_breaking_candidate=%s,updated_at=NOW()
                WHERE id=%s""",
