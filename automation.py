@@ -542,20 +542,35 @@ def _research_metadata(source_names, published_at, created_at=None):
 
 
 def _backfill_research_fields():
+    # One set-based UPDATE avoids hundreds of round trips to the remote database
+    # during startup and keeps the web service responsive.
     with conn() as c:
-        rows = c.execute(
-            "SELECT id,title,summary,category,sources,published_at,created FROM stories"
-        ).fetchall()
-        for row in rows:
-            category = row["category"] if row["category"] and row["category"] != "Uncategorized" else _research_category(row["title"], row["summary"])
-            names = list(row["sources"] or [])
-            flags, evidence, breaking = _research_metadata(names, row["published_at"], row["created"])
-            group_key = hashlib.sha256(_normalized_title(row["title"]).encode("utf-8")).hexdigest()[:20]
-            c.execute(
-                "UPDATE stories SET category=%s,research_flags=%s,evidence_status=%s,is_breaking_candidate=%s,duplicate_group_key=%s WHERE id=%s",
-                (category, Jsonb(flags), evidence, breaking, group_key, row["id"])
-            )
-
+        c.execute("""
+            UPDATE stories
+            SET category = CASE
+                WHEN (title || ' ' || summary) ~* '(राजनीति|सरकार|मन्त्री|संसद|निर्वाचन|प्रधानमन्त्री|politic|government|parliament|election)' THEN 'Politics'
+                WHEN (title || ' ' || summary) ~* '(अन्तर्राष्ट्रिय|विदेश|भारत|चीन|अमेरिका|विश्व|international|world|global)' THEN 'International'
+                WHEN (title || ' ' || summary) ~* '(अर्थतन्त्र|आर्थिक|बजेट|बैंक|शेयर|व्यापार|महँगी|economy|business|market|finance)' THEN 'Economy'
+                WHEN (title || ' ' || summary) ~* '(खेलकुद|क्रिकेट|फुटबल|खेल|विश्वकप|league|cricket|football|sports|match)' THEN 'Sports'
+                WHEN (title || ' ' || summary) ~* '(शिक्षा|विद्यालय|कलेज|विश्वविद्यालय|परीक्षा|एसईई|शिक्षक|education|school|college|exam|university)' THEN 'Education'
+                WHEN (title || ' ' || summary) ~* '(प्रविधि|कम्प्युटर|मोबाइल|इन्टरनेट|एआई|सफ्टवेयर|technology|tech|software|internet|ai)' THEN 'Technology'
+                WHEN (title || ' ' || summary) ~* '(स्वास्थ्य|अस्पताल|चिकित्सा|रोग|औषधि|health|hospital|medical|disease)' THEN 'Health'
+                WHEN (title || ' ' || summary) ~* '(मनोरञ्जन|चलचित्र|फिल्म|सिनेमा|कलाकार|संगीत|entertainment|movie|film|music)' THEN 'Entertainment'
+                WHEN (title || ' ' || summary) ~* '(मौसम|वर्षा|बाढी|पहिरो|भूकम्प|आगलागी|weather|flood|landslide|earthquake|storm)' THEN 'Disaster & Weather'
+                WHEN (title || ' ' || summary) ~* '(प्रहरी|अपराध|गिरफ्तार|दुर्घटना|सुरक्षा|police|crime|arrest|accident|security)' THEN 'Crime & Security'
+                WHEN (title || ' ' || summary) ~* '(नेपाल|नेपाली|राष्ट्रिय|देशभर|काठमाडौं|nepal|national)' THEN 'National'
+                ELSE 'Other'
+            END,
+            research_flags =
+                (CASE WHEN published_at IS NULL THEN jsonb_build_array('publication_time_unknown') ELSE '[]'::jsonb END) ||
+                (CASE WHEN published_at < NOW() - INTERVAL '48 hours' THEN jsonb_build_array('possibly_old_news') ELSE '[]'::jsonb END) ||
+                (CASE WHEN source_count >= 2 THEN jsonb_build_array('similar_headline_seen_in_multiple_sources') ELSE '[]'::jsonb END) ||
+                (CASE WHEN source_count >= 3 AND published_at >= NOW() - INTERVAL '6 hours' THEN jsonb_build_array('breaking_candidate_requires_editorial_verification') ELSE '[]'::jsonb END),
+            evidence_status = CASE WHEN source_count >= 2 THEN 'multiple_source_headline_match_only' ELSE 'single_source' END,
+            is_breaking_candidate = (source_count >= 3 AND published_at >= NOW() - INTERVAL '6 hours'),
+            duplicate_group_key = md5(regexp_replace(lower(title), '[^[:alnum:]\\u0900-\\u097f]+', ' ', 'g'))
+            WHERE category = 'Uncategorized' OR duplicate_group_key IS NULL
+        """)
 
 def add(title, summary, url, source, published_at=None):
     if not title or not url.startswith(("http://", "https://")):
