@@ -2,7 +2,7 @@
 
 A phased Nepali digital newsroom project. Development is divided into phases, with automated tests and production verification after each phase.
 
-## Current status: Phases 1–11 implemented
+## Current status: Phases 1–12 implemented
 
 The production newsroom includes news collection and research, editorial review, Nepali draft generation, monitoring, analytics, read-only Facebook connection checks, and admin security protections. Draft generation remains on-demand. Editorial approval does not publish a post, and Facebook publishing remains disabled.
 
@@ -41,6 +41,10 @@ Collection is available from the newsroom and automatic monitoring is configured
 11. Automated regression tests — admin security tests added to the GitHub Actions test suite
 
 Phase 11 verifies the security controls without contacting the production database, generating drafts, or publishing to Facebook. Production deployments should be checked after each code change.
+
+12. Production monitoring — scheduled checks verify application liveness, database readiness, and admin login/CSRF availability
+
+Phase 12 extends the existing 10-minute GitHub Actions monitor. It checks the public health endpoint, database readiness endpoint, and admin login page's CSRF field. These checks do not sign in, change data, generate drafts, or publish posts. GitHub scheduled workflows can be delayed, and this monitor does not guarantee Render uptime.
 
 ## Render environment variables
 
