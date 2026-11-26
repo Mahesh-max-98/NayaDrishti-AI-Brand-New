@@ -1272,6 +1272,20 @@ def facebook_connection_status():
     }
 
 
+def _unreviewed_facebook_message(title, summary, article_url):
+    """Build a clearly labelled post using only stored source material."""
+    title = str(title or "").strip()
+    summary = str(summary or "").strip()
+    article_url = str(article_url or "").strip()
+    if not title or not article_url.startswith(("https://", "http://")):
+        raise ValueError("Automatic publishing requires a headline and a valid original source URL.")
+    message = "⚠️ प्रारम्भिक सूचना — यो सामग्री उपलब्ध स्रोतबाट संकलित हो; स्वतन्त्र पुष्टि बाँकी छ।\\n\\n" + title
+    if summary:
+        message += "\\n\\n" + summary
+    message += "\\n\\nमूल स्रोत: " + article_url
+    return message
+
+
 def publish(sid, manual=False):
     config = _facebook_config()
     if not config["publishing_enabled"]:
@@ -1303,15 +1317,10 @@ def publish(sid, manual=False):
         elif row["status"] == "approved" and draft_text:
             message = draft_text
         else:
-            title = str(row["title"] or "").strip()
-            summary = str(row["summary"] or "").strip()
-            article_url = str(row["url"] or "").strip()
-            if not title or not article_url.startswith(("https://", "http://")):
-                return False, "Automatic publishing requires a headline and a valid original source URL."
-            message = "⚠️ प्रारम्भिक सूचना — यो सामग्री उपलब्ध स्रोतबाट संकलित हो; स्वतन्त्र पुष्टि बाँकी छ।\\n\\n" + title
-            if summary:
-                message += "\\n\\n" + summary
-            message += "\\n\\nमूल स्रोत: " + article_url
+            try:
+                message = _unreviewed_facebook_message(row["title"], row["summary"], row["url"])
+            except ValueError as exc:
+                return False, str(exc)
 
         test = c.execute("""
             SELECT details FROM activity_logs
