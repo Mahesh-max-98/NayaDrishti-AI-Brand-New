@@ -1122,7 +1122,8 @@ def _add_with_conn(c, title, summary, url, source, published_at=None):
 
     if match:
         names = list(match["sources"] or [])
-        if source not in names:
+        new_publisher = source not in names
+        if new_publisher:
             names.append(source)
         prior_summary = str(match["summary"] or "")
         merged_summary = summary if len(prior_summary.strip()) < 35 and len(str(summary or "").strip()) >= 35 else (prior_summary or summary)
@@ -1137,6 +1138,15 @@ def _add_with_conn(c, title, summary, url, source, published_at=None):
             (Jsonb(names), len(names), (summary or "")[:4000], (summary or "")[:4000],
              published_at, Jsonb(flags), evidence, breaking, match["id"])
         )
+        # New publisher evidence may justify retrying a prior hold. The normal
+        # verification gate still requires two substantial, distinct domains.
+        if new_publisher:
+            c.execute("""
+                UPDATE stories
+                SET verification_status='pending', verification_score=NULL,
+                    verification_report='{}'::jsonb, verified_at=NULL
+                WHERE id=%s AND status='draft' AND verification_status='held'
+            """, (match["id"],))
         return "matched"
 
     names = [source]
