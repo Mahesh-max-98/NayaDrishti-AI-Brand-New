@@ -1279,10 +1279,10 @@ def _unreviewed_facebook_message(title, summary, article_url):
     article_url = str(article_url or "").strip()
     if not title or not article_url.startswith(("https://", "http://")):
         raise ValueError("Automatic publishing requires a headline and a valid original source URL.")
-    message = "⚠️ प्रारम्भिक सूचना — यो सामग्री उपलब्ध स्रोतबाट संकलित हो; स्वतन्त्र पुष्टि बाँकी छ।\\n\\n" + title
+    message = "⚠️ प्रारम्भिक सूचना — यो सामग्री उपलब्ध स्रोतबाट संकलित हो; स्वतन्त्र पुष्टि बाँकी छ।\n\n" + title
     if summary:
-        message += "\\n\\n" + summary
-    message += "\\n\\nमूल स्रोत: " + article_url
+        message += "\n\n" + summary
+    message += "\n\nमूल स्रोत: " + article_url
     return message
 
 
