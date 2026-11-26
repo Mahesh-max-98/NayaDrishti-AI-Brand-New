@@ -107,3 +107,15 @@ Set a PostgreSQL `DATABASE_URL` for a local development database, then run:
 pip install -r requirements.txt
 python app.py
 ```
+
+
+## Phase 16 — AI evidence verification and guarded auto-approval
+
+- Compares source-level evidence from at least two distinct publisher domains; headline similarity alone never qualifies.
+- Requires substantial summaries, structured claim-level comparison, no reported contradictions, a verified verdict, and a model score of at least 92/100.
+- Sensitive/high-impact categories (politics, crime, health, finance, disasters and developing news) are held for human review.
+- Reuses the existing Nepali draft generator without changing its prompt or fallback behavior.
+- Only AI-verified, automatically approved stories with a saved draft are eligible for automatic Facebook publishing.
+- Verification results, evidence domains, scores, and hold reasons are persisted on each story and recorded in activity logs.
+- AI scores are model estimates, not proof of truth; the workflow is intentionally conservative and can hold stories when evidence is incomplete.
+- Facebook environment switches remain OFF by default and must be explicitly enabled by the Page owner after permission checks.
