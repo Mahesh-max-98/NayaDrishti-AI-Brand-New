@@ -1,10 +1,12 @@
 import json
 import os
+import secrets
+import time
 import urllib.error
 import urllib.request
 from datetime import timedelta
 
-from flask import Flask, jsonify, redirect, render_template_string, request
+from flask import Flask, jsonify, redirect, render_template_string, request, session
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
@@ -15,13 +17,52 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 
 
+_login_failures = {}
+
+
+@app.before_request
+def protect_admin_requests():
+    # CSRF tokens are scoped to the browser's signed admin session.
+    if request.path.startswith(("/admin", "/api/admin")):
+        if not session.get("csrf_token"):
+            session["csrf_token"] = secrets.token_urlsafe(32)
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            expected = str(session.get("csrf_token", ""))
+            supplied = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token", "")
+            if not expected or not supplied or not secrets.compare_digest(str(supplied), expected):
+                return jsonify({"error": "Security check failed. Refresh the page and try again."}), 403
+
+    # Basic per-IP login throttling. Render runs one Gunicorn worker for this app.
+    if request.path == "/admin/login" and request.method == "POST":
+        now = time.time()
+        ip = request.remote_addr or "unknown"
+        recent = [stamp for stamp in _login_failures.get(ip, []) if now - stamp < 900]
+        _login_failures[ip] = recent
+        if len(recent) >= 5:
+            return "Too many sign-in attempts. Please wait 15 minutes before trying again.", 429
+
+
 @app.after_request
 def add_security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; "
+        "form-action 'self'; frame-ancestors 'none'"
+    )
+    if request.path == "/admin/login" and request.method == "POST" and response.status_code == 401:
+        ip = request.remote_addr or "unknown"
+        _login_failures.setdefault(ip, []).append(time.time())
     return response
+
+
+@app.context_processor
+def inject_security_context():
+    return {"csrf_token": session.get("csrf_token", "")}
 
 HOME_PAGE = """<!doctype html>
 <html lang="en"><head>
