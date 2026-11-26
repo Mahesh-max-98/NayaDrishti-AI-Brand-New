@@ -8,6 +8,7 @@ import re
 import hashlib
 import logging
 import socket
+import threading
 import time
 import ipaddress
 from email.utils import parsedate_to_datetime
@@ -294,6 +295,9 @@ def init():
         c.execute("INSERT INTO schema_migrations(version) VALUES(8) ON CONFLICT(version) DO NOTHING")
 
 def database_status():
+    # Do not report readiness while asynchronous schema initialization is running.
+    if not DATABASE_INITIALIZED:
+        return {"ok": False, "database": None, "initializing": bool(DATABASE_URL)}
     try:
         with conn() as c:
             row = c.execute("""
@@ -1864,10 +1868,21 @@ def _repair_research_signals():
         c.execute("INSERT INTO schema_migrations(version) VALUES(7) ON CONFLICT(version) DO NOTHING")
 
 
-# Initialize the schema only when a DATABASE_URL is configured. A connection
-# problem is reported by /ready rather than crashing the web process.
+# Keep the web process responsive while PostgreSQL migrations and one-time
+# research backfills run. Render must see Gunicorn bind its port before these
+# potentially slow cross-region database operations finish.
 DATABASE_INITIALIZED = False
-if DATABASE_URL:
+
+scheduler = BackgroundScheduler(timezone="Asia/Kathmandu")
+scheduler.add_job(
+    cycle, "interval", minutes=5, id="automatic-news-collection",
+    replace_existing=True, max_instances=1, coalesce=True,
+    next_run_time=datetime.now(timezone.utc)
+)
+
+
+def _initialize_database_and_scheduler():
+    global DATABASE_INITIALIZED
     try:
         init()
         # Do not reseed or rewrite the 25 source rows on every rolling deploy.
@@ -1884,22 +1899,19 @@ if DATABASE_URL:
         _backfill_research_fields()
         _repair_research_signals()
         DATABASE_INITIALIZED = True
+        scheduler.start()
+        logger.info("PostgreSQL initialization completed; automatic news collection scheduler started.")
     except Exception:
+        DATABASE_INITIALIZED = False
         logger.exception("PostgreSQL schema initialization or default source setup failed; scheduler will remain stopped.")
 
 
-scheduler = BackgroundScheduler(timezone="Asia/Kathmandu")
-scheduler.add_job(
-    cycle, "interval", minutes=5, id="automatic-news-collection",
-    replace_existing=True, max_instances=1, coalesce=True,
-    next_run_time=datetime.now(timezone.utc)
-)
-if DATABASE_INITIALIZED:
-    try:
-        scheduler.start()
-        logger.info("Automatic Nepali news collection scheduler started.")
-    except Exception:
-        logger.exception("Automatic news collection scheduler could not start.")
+if DATABASE_URL:
+    threading.Thread(
+        target=_initialize_database_and_scheduler,
+        name="nayadrishti-database-init",
+        daemon=True
+    ).start()
 
 
 LOGIN = """<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>Admin login</title><style>body{background:#0b1220;color:white;font:16px system-ui;display:grid;place-items:center;min-height:90vh}.box{background:#152238;padding:28px;border-radius:16px}input,button{padding:12px;margin:6px;border-radius:8px}</style><div class=box><h2>NayaDrishti Admin</h2><p>{{error}}</p><form method=post><input type=hidden name=csrf_token value="{{csrf_token}}"><input name=password type=password placeholder='Admin password' autocomplete=current-password required><button>Sign in</button></form></div>"""
