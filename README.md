@@ -1,10 +1,10 @@
 # NayaDrishti AI
 
-A phased Nepali digital newsroom project. Development is intentionally divided into nine phases, with testing and verification after each phase.
+A phased Nepali digital newsroom project. Development is divided into phases, with automated tests and production verification after each phase.
 
-## Current phase: Phase 6 — Editorial dashboard and draft management
+## Current status: Phases 1–11 implemented
 
-Phases 1–5 are implemented. Phase 5 provides an authenticated, on-demand Nepali AI draft generator. Generated drafts are saved for editorial review and are never published automatically.
+The production newsroom includes news collection and research, editorial review, Nepali draft generation, monitoring, analytics, read-only Facebook connection checks, and admin security protections. Draft generation remains on-demand. Editorial approval does not publish a post, and Facebook publishing remains disabled.
 
 ## Completed Phase 3 — News source management and collection
 
@@ -30,15 +30,17 @@ Collection is available from the newsroom and automatic monitoring is configured
 
 1. Foundation — complete
 2. PostgreSQL database — complete
-3. News source management and collection — implemented; production collection test pending
+3. News source management and collection — complete
 4. News research, duplicate detection and categorization — complete
-5. Nepali AI writing engine — complete
-6. Editorial dashboard and draft management — next
-7. Automatic news monitoring
-8. Analytics and system health
-9. Facebook Page integration and publishing
+5. Nepali AI writing engine — complete; generation remains on-demand
+6. Editorial dashboard and draft management — complete
+7. Automatic news monitoring — complete
+8. Analytics and system health — complete
+9. Facebook Page integration — read-only connection verified; publishing remains OFF
+10. Admin security — CSRF protection, security headers, secure session settings and login throttling deployed
+11. Automated regression tests — admin security tests added to the GitHub Actions test suite
 
-Each phase must be tested before the next phase begins.
+Phase 11 verifies the security controls without contacting the production database, generating drafts, or publishing to Facebook. Production deployments should be checked after each code change.
 
 ## Render environment variables
 
