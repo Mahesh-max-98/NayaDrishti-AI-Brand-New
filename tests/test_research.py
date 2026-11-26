@@ -28,6 +28,36 @@ class HeadlineMatchingTests(unittest.TestCase):
     def test_empty_titles_never_match(self):
         self.assertEqual(automation._title_similarity("", "नेपाल समाचार"), 0.0)
 
+    def test_matcher_accepts_rephrased_headline_with_three_shared_terms(self):
+        self.assertTrue(automation._headline_match_candidate(
+            "नेपाल क्रिकेट टोलीले आज प्रतियोगिता जित्यो",
+            "आज नेपाल क्रिकेट टोलीले फाइनल खेल जित्यो",
+            "Sports", "Sports"
+        ))
+
+    def test_matcher_rejects_generic_two_word_overlap(self):
+        self.assertFalse(automation._headline_match_candidate(
+            "नेपाल सरकारले नयाँ निर्णय गर्‍यो",
+            "नेपाल सरकारले अर्को योजना सार्वजनिक गर्‍यो",
+            "Politics", "Politics"
+        ))
+
+    def test_matcher_rejects_different_categories(self):
+        self.assertFalse(automation._headline_match_candidate(
+            "नेपाल क्रिकेट टोलीले प्रतियोगिता जित्यो",
+            "नेपाल क्रिकेट टोलीले प्रतियोगिता जित्यो",
+            "Sports", "Politics"
+        ))
+
+    def test_matcher_rejects_reports_more_than_one_day_apart(self):
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        self.assertFalse(automation._headline_match_candidate(
+            "नेपाल क्रिकेट टोलीले प्रतियोगिता जित्यो",
+            "नेपाल क्रिकेट टोली प्रतियोगितामा विजयी भयो",
+            "Sports", "Sports", now, now - timedelta(hours=30)
+        ))
+
 
 class PublicationDateTests(unittest.TestCase):
     def test_rss_published_date_is_parsed(self):
