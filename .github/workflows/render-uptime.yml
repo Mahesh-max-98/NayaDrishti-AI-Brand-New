@@ -37,10 +37,7 @@ jobs:
           ADMIN_URL: https://nayadrishti-ai-brand-new.onrender.com
         run: |
           set -euo pipefail
-          page="$(curl --fail --silent --show-error --location \
-            --connect-timeout 15 --max-time 90 \\
-            --retry 2 --retry-delay 5 --retry-all-errors \\
-            "$ADMIN_URL/admin/login")"
+          page="$(curl --fail --silent --show-error --location --connect-timeout 15 --max-time 90 --retry 2 --retry-delay 5 --retry-all-errors "$ADMIN_URL/admin/login")"
           python -c 'import sys; p=sys.stdin.read(); assert "name=csrf_token" in p or "name=\"csrf_token\"" in p, "Admin login page is missing its CSRF form field"; print("Admin login page and CSRF field are available.")' <<< "$page"
 
       - name: Check application and database readiness
