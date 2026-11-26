@@ -171,6 +171,14 @@ def init():
             """)
             c.execute("INSERT INTO schema_migrations(version) VALUES(6) ON CONFLICT(version) DO NOTHING")
             c.execute("INSERT INTO schema_migrations(version) VALUES(8) ON CONFLICT(version) DO NOTHING")
+            # Freeze the existing newsroom backlog out of AI auto-approval.
+            # Only story IDs created after this one-time cutoff are eligible.
+            c.execute("""
+                INSERT INTO settings(key,value)
+                SELECT 'ai_auto_approval_after_story_id', COALESCE(MAX(id),0)::text
+                FROM stories
+                ON CONFLICT(key) DO NOTHING
+            """)
             return
         c.execute("""
             CREATE TABLE IF NOT EXISTS sources (
@@ -271,6 +279,14 @@ def init():
         c.execute("CREATE INDEX IF NOT EXISTS idx_stories_category_created ON stories(category, created DESC)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_stories_published_at ON stories(published_at DESC)")
         c.execute("INSERT INTO settings(key, value) VALUES('auto', '0') ON CONFLICT(key) DO NOTHING")
+        # Freeze the existing newsroom backlog out of AI auto-approval.
+        # Only story IDs created after this one-time cutoff are eligible.
+        c.execute("""
+            INSERT INTO settings(key,value)
+            SELECT 'ai_auto_approval_after_story_id', COALESCE(MAX(id),0)::text
+            FROM stories
+            ON CONFLICT(key) DO NOTHING
+        """)
         c.execute("INSERT INTO schema_migrations(version) VALUES(1) ON CONFLICT(version) DO NOTHING")
         c.execute("INSERT INTO schema_migrations(version) VALUES(2) ON CONFLICT(version) DO NOTHING")
         c.execute("INSERT INTO schema_migrations(version) VALUES(3) ON CONFLICT(version) DO NOTHING")
@@ -1547,6 +1563,10 @@ def auto_verify_and_approve_stories(batch_size=3):
             SELECT id, title, summary, category
             FROM stories
             WHERE status='draft' AND verification_status='pending'
+              AND id > COALESCE((
+                  SELECT value::bigint FROM settings
+                  WHERE key='ai_auto_approval_after_story_id'
+              ),0)
               AND created >= NOW() - INTERVAL '24 hours'
               AND source_count >= 2 AND COALESCE(is_breaking_candidate,FALSE)=FALSE
             ORDER BY created ASC, id ASC
@@ -1947,7 +1967,6 @@ def logout():
 @auth
 def panel():
     return render_template_string(PANEL)
-
 
 @bp.get("/api/admin/status")
 @auth
