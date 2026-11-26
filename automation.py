@@ -960,7 +960,7 @@ def _headline_match_candidate(left_title, right_title, left_category, right_cate
     if len(shared) < 3:
         return False
     coverage = len(shared) / min(len(left), len(right))
-    return coverage >= 0.72 or _title_similarity(left_title, right_title) >= 0.88
+    return coverage >= 0.70 or _title_similarity(left_title, right_title) >= 0.88
 
 
 def _published_datetime(entry):
