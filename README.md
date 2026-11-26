@@ -2,7 +2,7 @@
 
 A phased Nepali digital newsroom project. Development is divided into phases, with automated tests and production verification after each phase.
 
-## Current status: Phases 1–12 implemented
+## Current status: Phases 1–14 implemented
 
 The production newsroom includes news collection and research, editorial review, Nepali draft generation, monitoring, analytics, read-only Facebook connection checks, and admin security protections. Draft generation remains on-demand. Editorial approval does not publish a post, and Facebook publishing remains disabled.
 
@@ -45,6 +45,10 @@ Phase 11 verifies the security controls without contacting the production databa
 12. Production monitoring — scheduled checks verify application liveness, database readiness, and admin login/CSRF availability
 
 Phase 12 extends the existing 10-minute GitHub Actions monitor. It checks the public health endpoint, database readiness endpoint, and admin login page's CSRF field. These checks do not sign in, change data, generate drafts, or publish posts. GitHub scheduled workflows can be delayed, and this monitor does not guarantee Render uptime.
+
+13. Deployment safety — Render auto-deploy waits for CI checks to pass. A temporary, intentionally failing pull-request test confirmed GitHub Actions reports a failed check; the test PR was closed unmerged and did not change production. Render's failure-blocking behavior has not been independently proven with a main-branch deployment attempt.
+
+14. Health and readiness regression coverage — automated tests verify the liveness response and readiness outcomes for missing configuration, database failure, and a ready database. Health responses no longer advertise the obsolete Phase 5 label.
 
 ## Render environment variables
 
