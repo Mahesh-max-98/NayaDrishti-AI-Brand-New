@@ -663,7 +663,8 @@ def _fetch_feed(url):
         path.endswith(("/feed", "/feed/", "/rss", "/rss/"))
         or path.endswith((".xml", ".atom"))
     )
-    candidates = [url]    if not is_feed_path:
+    candidates = [url]
+    if not is_feed_path:
         for fallback_path in ("/feed", "/feed/", "/rss", "/rss/", "/rss.xml", "/atom.xml"):
             candidate = urllib.parse.urljoin(base, fallback_path.lstrip("/"))
             if candidate not in candidates:
@@ -1312,7 +1313,8 @@ def _unreviewed_facebook_message(title, summary, article_url):
     if not title or not article_url.startswith(("https://", "http://")):
         raise ValueError("Automatic publishing requires a headline and a valid original source URL.")
     message = "⚠️ प्रारम्भिक सूचना — यो सामग्री उपलब्ध स्रोतबाट संकलित हो; स्वतन्त्र पुष्टि बाँकी छ।\n\n" + title
-    if summary:        message += "\n\n" + summary
+    if summary:
+        message += "\n\n" + summary
     message += "\n\nमूल स्रोत: " + article_url
     return message
 
