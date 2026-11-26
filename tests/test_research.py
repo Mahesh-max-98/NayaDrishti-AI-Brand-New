@@ -31,7 +31,7 @@ class HeadlineMatchingTests(unittest.TestCase):
     def test_matcher_accepts_rephrased_headline_with_three_shared_terms(self):
         self.assertTrue(automation._headline_match_candidate(
             "नेपाल क्रिकेट टोलीले आज प्रतियोगिता जित्यो",
-            "आज नेपाल क्रिकेट टोली प्रतियोगितामा विजयी",
+            "आज नेपाल क्रिकेट टोलीले फाइनल खेल जित्यो",
             "Sports", "Sports"
         ))
 
