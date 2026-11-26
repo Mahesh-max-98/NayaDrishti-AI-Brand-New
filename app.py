@@ -1,3 +1,4 @@
+import encodings.idna  # Register the IDNA codec before Flask handles request hostnames.
 import json
 import os
 import secrets
