@@ -7,8 +7,11 @@ import urllib.request
 from datetime import timedelta
 
 from flask import Flask, jsonify, redirect, render_template_string, request, session
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
+# Render forwards the original client IP and HTTPS scheme through one trusted proxy.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
