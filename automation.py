@@ -1274,28 +1274,45 @@ def facebook_connection_status():
 
 def publish(sid, manual=False):
     config = _facebook_config()
-    if not manual:
-        return False, "Only an explicit manual publishing action is allowed. Automatic publishing is disabled."
     if not config["publishing_enabled"]:
-        return False, "Facebook manual publishing is OFF. Enable it explicitly in Render before publishing."
+        return False, "Facebook publishing is OFF."
+    if not manual and not config["auto_publish_enabled"]:
+        return False, "Facebook automatic publishing is OFF."
     if not config["configured"]:
         return False, "Facebook Page ID and Page access token are not configured in Render."
 
-    # Reserve this story before making the external request. A previous attempt,
-    # including an uncertain timeout, blocks automatic retries to avoid duplicates.
     with conn() as c:
         row = c.execute(
-            "SELECT id,draft,status,post_id FROM stories WHERE id=%s FOR UPDATE",
+            "SELECT id,title,summary,url,source_name,draft,status,post_id FROM stories WHERE id=%s FOR UPDATE",
             (sid,)
         ).fetchone()
         if not row:
             return False, "Story not found."
-        if row["status"] != "approved":
-            return False, "Only drafts explicitly approved by the admin can be published."
-        if not str(row["draft"] or "").strip():
-            return False, "This approved story has no saved draft."
+        if row["status"] == "dismissed":
+            return False, "Dismissed stories cannot be published."
+        if manual and row["status"] != "approved":
+            return False, "Manual publishing requires an approved draft."
         if row["post_id"]:
             return False, "This story already has a Facebook post ID; duplicate publishing is blocked."
+
+        draft_text = _remove_comment_on_heading(row["draft"] or "").strip()
+        if manual:
+            if not draft_text:
+                return False, "This approved story has no saved draft."
+            message = draft_text
+        elif row["status"] == "approved" and draft_text:
+            message = draft_text
+        else:
+            title = str(row["title"] or "").strip()
+            summary = str(row["summary"] or "").strip()
+            article_url = str(row["url"] or "").strip()
+            if not title or not article_url.startswith(("https://", "http://")):
+                return False, "Automatic publishing requires a headline and a valid original source URL."
+            message = "⚠️ प्रारम्भिक सूचना — यो सामग्री उपलब्ध स्रोतबाट संकलित हो; स्वतन्त्र पुष्टि बाँकी छ।\\n\\n" + title
+            if summary:
+                message += "\\n\\n" + summary
+            message += "\\n\\nमूल स्रोत: " + article_url
+
         test = c.execute("""
             SELECT details FROM activity_logs
             WHERE event_type='facebook_connection_test'
@@ -1318,7 +1335,7 @@ def publish(sid, manual=False):
     try:
         result = _facebook_graph_request(
             "POST", f"{config['page_id']}/feed",
-            {"message": _remove_comment_on_heading(row["draft"])}
+            {"message": message}
         )
         post_id = str(result.get("id", "")).strip()
         if not post_id:
@@ -1352,6 +1369,34 @@ def publish(sid, manual=False):
             ("facebook_published", "An approved news draft was published to the connected Facebook Page.", Jsonb({"story_id": sid, "post_id": post_id}))
         )
     return True, post_id
+
+
+def auto_publish_collected_news(batch_size=5):
+    """Publish newly collected, non-dismissed stories once when explicitly enabled."""
+    config = _facebook_config()
+    if not (config["configured"] and config["publishing_enabled"] and config["auto_publish_enabled"]):
+        return {"attempted": 0, "published": 0, "failed": 0}
+    with conn() as c:
+        rows = c.execute("""
+            SELECT s.id
+            FROM stories s
+            LEFT JOIN facebook_publications p ON p.story_id=s.id
+            WHERE s.status <> 'dismissed'
+              AND s.post_id IS NULL
+              AND p.story_id IS NULL
+            ORDER BY s.created ASC, s.id ASC
+            LIMIT %s
+        """, (max(1, min(int(batch_size), 10)),)).fetchall()
+    totals = {"attempted": 0, "published": 0, "failed": 0}
+    for row in rows:
+        totals["attempted"] += 1
+        ok, result = publish(row["id"], manual=False)
+        if ok:
+            totals["published"] += 1
+        else:
+            totals["failed"] += 1
+            logger.warning("Automatic Facebook publication skipped for story %s: %s", row["id"], result)
+    return totals
 
 
 def cycle():
@@ -1389,6 +1434,11 @@ def cycle():
             )
 
         result = collect()
+        facebook_totals = auto_publish_collected_news()
+        logger.info(
+            "Facebook automatic publishing: %s published, %s attempted, %s skipped/failed.",
+            facebook_totals["published"], facebook_totals["attempted"], facebook_totals["failed"]
+        )
         duration = round((datetime.now(timezone.utc) - started_at).total_seconds(), 2)
         with conn() as c:
             c.execute("""
