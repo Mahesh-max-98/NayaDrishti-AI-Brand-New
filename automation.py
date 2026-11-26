@@ -936,6 +936,32 @@ def _title_similarity(left, right):
     overlap = len(a_tokens & b_tokens) / max(1, len(a_tokens | b_tokens))
     return max(sequence_score, overlap)
 
+def _headline_match_candidate(left_title, right_title, left_category, right_category,
+                              left_published_at=None, right_published_at=None):
+    """Conservative same-event candidate check; this is not fact verification."""
+    same_category = (
+        left_category == right_category
+        or left_category in ("Other", "Uncategorized")
+        or right_category in ("Other", "Uncategorized")
+    )
+    if not same_category:
+        return False
+    if left_published_at and right_published_at:
+        if abs((left_published_at - right_published_at).total_seconds()) > 24 * 3600:
+            return False
+
+    left = set(_normalized_title(left_title).split())
+    right = set(_normalized_title(right_title).split())
+    # Very short titles need near-exact wording; generic two-word overlaps
+    # are too risky to merge as one event.
+    if min(len(left), len(right)) < 3:
+        return _title_similarity(left_title, right_title) >= 0.92
+    shared = left & right
+    if len(shared) < 3:
+        return False
+    coverage = len(shared) / min(len(left), len(right))
+    return coverage >= 0.72 or _title_similarity(left_title, right_title) >= 0.88
+
 
 def _published_datetime(entry):
     value = entry.get("published_parsed") or entry.get("updated_parsed")
@@ -1087,14 +1113,10 @@ def _add_with_conn(c, title, summary, url, source, published_at=None):
     ).fetchall()
     match = None
     for row in rows:
-        score = _title_similarity(title, row["title"])
-        same_category = row["category"] == category or row["category"] in ("Other", "Uncategorized") or category == "Other"
-        if score >= 0.84 and same_category:
-            # Similar headlines published far apart should remain separate stories.
-            if published_at and row["published_at"]:
-                age_gap = abs((published_at - row["published_at"]).total_seconds())
-                if age_gap > 48 * 3600:
-                    continue
+        if _headline_match_candidate(
+            title, row["title"], category, row["category"],
+            published_at, row["published_at"]
+        ):
             match = row
             break
 
