@@ -119,6 +119,11 @@ def init():
         current_version = c.execute(
             "SELECT COALESCE(MAX(version),0)::int AS version FROM schema_migrations"
         ).fetchone()["version"]
+        # All migrations through version 9 are complete. Avoid repeating
+        # table-wide cleanup UPDATEs and DDL on every Render restart; those
+        # operations can hold locks and delay the background initializer.
+        if current_version >= 9:
+            return
         # Phase 6 migration: Phase 4 introduced publisher provenance, but
         # databases already at version 4 may predate the story_sources table.
         if current_version >= 4:
